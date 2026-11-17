@@ -3,12 +3,13 @@ window.__ModuleLoader__.load({
   factory(require) {
     const React = require('react')
     const { createElement: h, useEffect, useId, useState } = React
-    const { Button, Menu, Modal, Input, IconChevronDownOutlineRegular, IconPlusOutlineRegular } =
+    const { Button, Menu, Modal, Input, IconChevronDownOutlineRegular, IconPlusOutlineRegular, IconListPenOutlineRegular } =
       require('@deepseek-ai/dsh-client-ui-primitives')
     const base = '/api/persona-continuity'
     const changedEvent = 'persona-continuity:changed'
     const normalOption = '__normal__'
     const createOption = '__create__'
+    const simulationPanel = 'persona-continuity-simulation'
 
     async function call(path, data) {
       const headers = {}
@@ -372,6 +373,146 @@ window.__ModuleLoader__.load({
       )
     }
 
+    const sampleRoles = JSON.stringify([
+      { id: '学生甲', group: '住校', background: '住在校内，晚间常去图书馆学习。步行到宿舍约十分钟。' },
+      { id: '学生乙', group: '通勤', background: '住在校外，晚课结束后需要从校门返回地铁站。' },
+    ], null, 2)
+    const sampleQuestions = JSON.stringify([
+      { id: 'use', text: '你每周预计使用几次夜间接驳车？', options: ['不会使用', '一至两次', '三次或以上'] },
+      { id: 'concern', text: '哪些因素会影响你的选择？' },
+    ], null, 2)
+    const simulationLayout = {
+      display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 350px), 1fr))', gap: 28,
+      alignItems: 'start', maxWidth: 1200, margin: '0 auto',
+    }
+    const jobStatus = { queued: '排队中', running: '作答中', done: '已完成', failed: '失败' }
+
+    function SimulationPanel() {
+      const [title, setTitle] = useState('校园夜间接驳问卷')
+      const [material, setMaterial] = useState('学校拟开通 21:00–23:00 夜间接驳车，每 20 分钟一班，往返图书馆、宿舍和地铁站。')
+      const [roles, setRoles] = useState(sampleRoles)
+      const [questions, setQuestions] = useState(sampleQuestions)
+      const [models, setModels] = useState(null)
+      const [model, setModel] = useState('')
+      const [runs, setRuns] = useState([])
+      const [id, setId] = useState('')
+      const [result, setResult] = useState(null)
+      const [refresh, setRefresh] = useState(0)
+      const [busy, setBusy] = useState(false)
+      const [error, setError] = useState('')
+
+      useEffect(() => {
+        let live = true
+        const fail = failure => { if (live) setError(failure.message) }
+        call('/simulation/models').then(value => {
+          if (!live) return
+          setModels(value)
+          if (value.length) setModel('0')
+        }, fail)
+        call('/simulation/runs').then(value => {
+          if (!live) return
+          setRuns(value)
+          setId(current => current || value[0]?.id || '')
+        }, fail)
+        return () => { live = false }
+      }, [])
+
+      useEffect(() => {
+        if (!id) return
+        let live = true
+        let timer
+        async function poll() {
+          try {
+            const value = await call('/simulation/result?id=' + encodeURIComponent(id))
+            if (!live) return
+            setResult(value)
+            if (value.jobs.some(job => job.status === 'queued' || job.status === 'running')) timer = setTimeout(poll, 1200)
+          } catch (failure) {
+            if (live) setError(failure.message)
+          }
+        }
+        void poll()
+        return () => { live = false; clearTimeout(timer) }
+      }, [id, refresh])
+
+      async function start(event) {
+        event.preventDefault()
+        if (!models?.[model] || busy) return
+        setBusy(true)
+        setError('')
+        try {
+          const task = { title, material, ...models[model], roles: JSON.parse(roles), questions: JSON.parse(questions) }
+          const run = await call('/simulation/run', task)
+          setRuns(previous => [{ id: run.id, title: title.trim() }, ...previous].slice(0, 30))
+          setResult(null)
+          setId(run.id)
+        } catch (failure) {
+          setError(failure instanceof SyntaxError ? '请检查角色和问卷的 JSON 格式' : failure.message)
+        } finally {
+          setBusy(false)
+        }
+      }
+
+      async function retry(role) {
+        if (busy) return
+        setBusy(true)
+        setError('')
+        try {
+          await call('/simulation/retry', { id, role })
+          setRefresh(value => value + 1)
+        } catch (failure) {
+          setError(failure.message)
+        } finally {
+          setBusy(false)
+        }
+      }
+
+      const editor = (label, value, change, rows) => h('label', null, label, h('textarea', {
+        value, rows, style: { ...textareaStyle, resize: 'vertical' }, onChange: event => change(event.target.value),
+      }))
+      const done = result?.jobs.filter(job => job.status === 'done' || job.status === 'failed').length ?? 0
+      return h('main', { style: { width: '100%', height: '100%', overflow: 'auto', padding: '20px clamp(16px, 3vw, 36px)' } },
+        h('h1', { style: { maxWidth: 1200, margin: '0 auto 20px', fontSize: 23 } }, '模拟任务'),
+        h('div', { style: simulationLayout },
+          h('form', { onSubmit: start, style: panelStyle },
+            h('h2', null, '问卷配置'),
+            h('label', null, '任务名称 ', h(Input, { value: title, maxLength: 100, required: true, onChange: event => setTitle(event.target.value) })),
+            h('label', null, '运行模型 ', h('select', {
+              value: model, onChange: event => setModel(event.target.value), style: selectStyle,
+            },
+            h('option', { value: '', disabled: true }, models === null ? '正在加载模型…' : models.length ? '选择模型' : '请先在 DSH 配置模型'),
+            (models ?? []).map((item, index) => h('option', { key: item.provider + '/' + item.model, value: String(index) }, item.label + ' · ' + item.provider)))),
+            editor('公共材料', material, setMaterial, 3),
+            editor('角色 JSON', roles, setRoles, 8),
+            editor('题目 JSON', questions, setQuestions, 8),
+            h(Button, { type: 'submit', variant: 'primary', disabled: busy || !models?.[model], style: { justifySelf: 'start' } },
+              busy ? '处理中…' : '运行问卷'),
+            errorMessage(error),
+          ),
+          h('section', { style: panelStyle },
+            h('h2', null, '逐人答卷'),
+            runs.length ? h('label', null, '运行记录 ', h('select', {
+              value: id, style: selectStyle, disabled: busy,
+              onChange: event => { setResult(null); setId(event.target.value) },
+            }, runs.map(run => h('option', { key: run.id, value: run.id }, run.title)))) : h('p', null, '运行问卷后查看结果。'),
+            result && h(React.Fragment, null,
+              h('label', null, '已处理 ' + done + ' / ' + result.jobs.length,
+                h('progress', { value: done, max: result.jobs.length, style: textareaStyle })),
+              result.jobs.map(job => h('details', { key: job.role },
+                h('summary', null, job.role + ' · ' + jobStatus[job.status]),
+                job.error && h('p', null, job.error),
+                job.status === 'failed' && h(Button, {
+                  type: 'button', size: 'sm', variant: 'outline', disabled: busy, onClick: () => retry(job.role),
+                }, '重试此角色'),
+                job.answers.map(item => h('div', { key: item.id },
+                  h('strong', null, result.questions.find(question => question.id === item.id)?.text),
+                  h('p', { style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } }, item.answer ?? '缺答'))))),
+            ),
+          ),
+        ),
+      )
+    }
+
     return {
       inject: ['slots', 'locale'],
       apply(ctx) {
@@ -384,6 +525,12 @@ window.__ModuleLoader__.load({
         ctx.slots.inject('conversation.input.left', () => ctx.slots.register({
           name: 'conversation.input.left', id: ns, order: 32, locale: ns,
         }, props => h(Picker, { key: String(props.sessionId ?? ''), ...props, t })))
+        ctx.slots.inject('main', () => ctx.slots.register({
+          name: 'main', key: simulationPanel,
+        }, SimulationPanel))
+        ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
+          name: 'sidebar.panellist', id: simulationPanel, order: 21, label: () => '模拟任务',
+        }, props => h(IconListPenOutlineRegular, { ...props, 'aria-hidden': true })))
       },
     }
   },

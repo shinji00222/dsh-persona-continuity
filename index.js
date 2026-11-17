@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { Store } from './lib/store.js'
 import { extract, rememberableInput, textBlocks } from './lib/extract.js'
 import { registerWeb } from './lib/web.js'
+import { createSimulation } from './lib/simulation.js'
 
 export const name = 'persona-continuity'
 export const inject = ['agents', 'sessions', 'systemPrompt', 'llm', 'connection']
@@ -25,6 +26,7 @@ export function apply(ctx) {
   const attached = new Map()
   const turns = new Map()
   const lifetime = new AbortController()
+  const simulation = createSimulation(store, ctx.llm, lifetime.signal)
   let draining = false
 
   const detach = id => {
@@ -129,9 +131,10 @@ export function apply(ctx) {
   }
 
   ctx.effect(() => {
-    const timer = setInterval(drain, 5000)
+    const poll = () => { drain(); simulation.drain() }
+    const timer = setInterval(poll, 5000)
     timer.unref()
-    drain()
+    poll()
     return () => {
       clearInterval(timer)
       lifetime.abort()
@@ -139,7 +142,7 @@ export function apply(ctx) {
       store.close()
     }
   })
-  ctx.effect(() => registerWeb(ctx.connection, api))
+  ctx.effect(() => registerWeb(ctx.connection, api, simulation))
 
   ctx.on('agent/created', ({ agent }) => { attach(agent) })
   ctx.on('agent/disposed', ({ agent }) => {

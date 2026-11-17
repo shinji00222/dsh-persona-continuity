@@ -9,7 +9,7 @@
 
 ## 本地试用
 
-打包运行 `npm pack`。将生成的 `dsh-persona-continuity-0.2.0-preview.2.tgz` 装入测试 profile，再启动该 profile。已在 DSH 0.2.2-rc.3 宿主验证。
+打包运行 `npm pack`。将生成的 `dsh-persona-continuity-0.2.0-preview.3.tgz` 装入测试 profile，再启动该 profile。已在 DSH 0.2.2-rc.3 宿主验证。
 
 - SQLite 文件位于 `$DSH_HOME/persona-continuity/memory.sqlite`。提炼时会将该轮的有限正文发送给当前会话的模型，召回时会把选中的记忆内容提供给模型。
 - 最新提炼可能需要几十秒。被取消和未完整结束的轮次跳过提炼。已开始的会话沿用绑定的人格设定版本。
@@ -18,3 +18,7 @@
 - 实现和调研参考见 [调研](docs/research.md)，阶段与验收见 [规划](docs/project-plan.md)。
 
 开发验证使用 `npm run check` 和 `npm test`。
+
+## 模拟任务
+
+从 DSH 左侧栏打开「模拟任务」，选模型，编辑角色和问卷 JSON 后运行。页面预填校园接驳问卷。每个角色单独作答，结果保存在运行记录中。失败的角色可以单独重试。
