@@ -1,0 +1,37 @@
+{
+  "name": "dsh-persona-continuity",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "description": "Independent cross-session memory for each DeepSeek Harness persona.",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "lib",
+    "locale",
+    "docs",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "check": "node --check index.js && node --check client.js && node --check lib/store.js && node --check lib/extract.js && node --check lib/web.js",
+    "test": "node --test"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  }
+}
