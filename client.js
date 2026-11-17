@@ -30,6 +30,9 @@ window.__ModuleLoader__.load({
         close: '关闭', cancel: '取消', createAndUse: '创建并使用', namePlaceholder: '输入人格名称',
         save: '保存人格', index: '记忆索引', search: '查找记忆', forget: '删除记忆', confirm: '删除这条长期记忆？',
         empty: '暂无匹配记忆', source: '来源会话', turn: '轮次', locked: '已开始的会话沿用原人格',
+        pending: '待确认记忆', pendingEmpty: '暂无待确认记忆', approve: '批准', reject: '拒绝',
+        edit: '编辑', editApprove: '编辑后批准', saveMemory: '保存记忆', revision: '修订已有记忆',
+        memoryTitle: '标题', summary: '摘要', detail: '详情', loading: '加载中…',
       },
       en: {
         title: 'Persona Continuity', normal: 'Standard chat', persona: 'Persona', new: 'New persona', name: 'Name',
@@ -37,6 +40,9 @@ window.__ModuleLoader__.load({
         instructions: 'Persona instructions', save: 'Save persona', index: 'Memory index', search: 'Search memories',
         forget: 'Forget', confirm: 'Delete this long-term memory?', empty: 'No matching memories', source: 'Source chat',
         turn: 'Turn', locked: 'The persona is fixed after the chat starts',
+        pending: 'Memories for review', pendingEmpty: 'No memories awaiting review', approve: 'Approve', reject: 'Reject',
+        edit: 'Edit', editApprove: 'Edit and approve', saveMemory: 'Save memory', revision: 'Revises a saved memory',
+        memoryTitle: 'Title', summary: 'Summary', detail: 'Details', loading: 'Loading…',
       },
     }
 
@@ -164,13 +170,125 @@ window.__ModuleLoader__.load({
       )
     }
 
+    const textareaStyle = { display: 'block', width: '100%' }
+    const actionsStyle = { display: 'flex', gap: 8, flexWrap: 'wrap' }
+
+    function MemoryCard({ row, pending, t, mutate }) {
+      const [edits, setEdits] = useState(null)
+      const [busy, setBusy] = useState(false)
+      const [error, setError] = useState('')
+
+      function edit() {
+        setEdits({ title: row.title, summary: row.summary, detail: row.detail })
+        setError('')
+      }
+
+      async function submit(path, action, value) {
+        if (busy) return
+        setBusy(true)
+        setError('')
+        try {
+          await mutate(path, { id: row.id, action, edits: value })
+          setEdits(null)
+        } catch (failure) {
+          setError(failure.message)
+        } finally {
+          setBusy(false)
+        }
+      }
+
+      const field = (key, label, maxLength, control, props = {}) => h('label', null, t(label),
+        h(control, {
+          ...props, value: edits[key], required: true, maxLength, disabled: busy,
+          onChange: event => setEdits({ ...edits, [key]: event.target.value }),
+        }))
+      const button = (label, onClick) => h(Button, {
+        size: 'sm', variant: 'outline', type: 'button', disabled: busy, onClick,
+      }, t(label))
+
+      return h('details', null,
+        h('summary', null, row.title, ' · ', row.summary),
+        pending && row.base_id && h('p', null, t('revision')),
+        h('p', { style: { overflowWrap: 'anywhere' } }, t('source'), ' ', row.session, ' · ', t('turn'), ' ', row.turn),
+        edits ? h('form', {
+          style: panelStyle, onSubmit: event => {
+            event.preventDefault()
+            void submit(pending ? '/review' : '/edit', pending ? 'approve' : undefined, edits)
+          },
+        },
+        field('title', 'memoryTitle', 90, Input),
+        field('summary', 'summary', 160, Input),
+        field('detail', 'detail', 1800, 'textarea', { rows: 5, style: textareaStyle }),
+        h('div', { style: actionsStyle },
+          h(Button, { size: 'sm', variant: 'primary', type: 'submit', disabled: busy }, t(pending ? 'approve' : 'saveMemory')),
+          button('cancel', () => { setEdits(null); setError('') })),
+        ) : h(React.Fragment, null,
+          h('p', { style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } }, row.detail),
+          h('div', { style: actionsStyle },
+            pending && button('approve', () => submit('/review', 'approve')),
+            button(pending ? 'editApprove' : 'edit', edit),
+            pending ? button('reject', () => submit('/review', 'reject')) :
+              button('forget', () => { if (window.confirm(t('confirm'))) void submit('/forget') }),
+          )),
+        errorMessage(error),
+      )
+    }
+
+    function MemoryPanel({ id, t }) {
+      const [query, setQuery] = useState('')
+      const [rows, setRows] = useState(null)
+      const [pending, setPending] = useState(null)
+      const [revision, setRevision] = useState(0)
+      const [error, setError] = useState('')
+      const persona = '?persona=' + encodeURIComponent(id)
+
+      useEffect(() => {
+        let live = true
+        const refresh = () => call('/pending' + persona).then(
+          value => { if (live) setPending(value) },
+          failure => { if (live) setError(failure.message) },
+        )
+        void refresh()
+        const timer = setInterval(refresh, 5000)
+        return () => { live = false; clearInterval(timer) }
+      }, [persona, revision])
+
+      useEffect(() => {
+        let live = true
+        const timer = setTimeout(() => {
+          call('/index' + persona + '&q=' + encodeURIComponent(query))
+            .then(value => { if (live) setRows(value) }, failure => { if (live) setError(failure.message) })
+        }, 180)
+        return () => { live = false; clearTimeout(timer) }
+      }, [persona, query, revision])
+
+      async function mutate(path, { id: entry, ...data }) {
+        await call(path, { ...data, persona: id, id: entry })
+        setError('')
+        setRevision(current => current + 1)
+      }
+
+      const cards = (entries, isPending) => entries === null ? h('p', null, t('loading')) :
+        entries.length ? entries.map(row => h(MemoryCard, { key: row.id, row, pending: isPending, t, mutate })) :
+          h('p', null, t(isPending ? 'pendingEmpty' : 'empty'))
+      return h('div', { style: panelStyle },
+        h('h3', null, t('pending')),
+        cards(pending, true),
+        h('h3', null, t('index')),
+        h(Input, {
+          type: 'search', 'aria-label': t('search'), placeholder: t('search'), value: query, maxLength: 300,
+          onChange: event => { setRows(null); setQuery(event.target.value) },
+        }),
+        cards(rows, false),
+        errorMessage(error),
+      )
+    }
+
     function Settings({ t }) {
       const [personas, setPersonas] = useState([])
       const [id, setId] = useState('')
       const [name, setName] = useState('')
       const [instructions, setInstructions] = useState('')
-      const [query, setQuery] = useState('')
-      const [rows, setRows] = useState([])
       const [error, setError] = useState('')
       const [busy, setBusy] = useState(false)
 
@@ -181,23 +299,11 @@ window.__ModuleLoader__.load({
         return () => { live = false }
       }, [])
 
-      useEffect(() => {
-        let live = true
-        if (!id) return
-        const timer = setTimeout(() => {
-          call('/index?persona=' + encodeURIComponent(id) + '&q=' + encodeURIComponent(query))
-            .then(value => { if (live) setRows(value) }, failure => { if (live) setError(failure.message) })
-        }, 180)
-        return () => { live = false; clearTimeout(timer) }
-      }, [id, query])
-
       function choose(next) {
         const persona = personas.find(item => item.id === next)
         setId(next)
         setName(persona?.name ?? '')
         setInstructions(persona?.instructions ?? '')
-        setQuery('')
-        setRows([])
         setError('')
       }
 
@@ -217,38 +323,19 @@ window.__ModuleLoader__.load({
         }
       }
 
-      async function forget(row) {
-        if (!window.confirm(t('confirm'))) return
-        try {
-          await call('/forget', { persona: id, id: row.id })
-          setRows(old => old.filter(item => item.id !== row.id))
-          setError('')
-        } catch (failure) {
-          setError(failure.message)
-        }
-      }
-
       return h('section', { style: panelStyle },
-        h('label', null, t('persona'), ' ', h('select', { style: selectStyle, value: id, onChange: e => choose(e.target.value) },
+        h('label', null, t('persona'), ' ', h('select', { style: selectStyle, value: id, disabled: busy, onChange: e => choose(e.target.value) },
           h('option', { value: '' }, t('new')),
           personas.map(persona => h('option', { key: persona.id, value: persona.id }, persona.name)))),
         h('form', { onSubmit: save, style: panelStyle },
           h('label', null, t('name'), ' ', h(Input, { value: name, required: true, maxLength: 48, onChange: e => setName(e.target.value) })),
           h('label', null, t('instructions'), h('textarea', {
             value: instructions, rows: 4, maxLength: 3500,
-            style: { display: 'block', width: '100%' }, onChange: e => setInstructions(e.target.value),
+            style: textareaStyle, onChange: e => setInstructions(e.target.value),
           })),
           h(Button, { variant: 'primary', type: 'submit', disabled: busy, style: { justifySelf: 'start' } }, t('save'))),
         errorMessage(error),
-        id && h('div', { style: panelStyle },
-          h('h3', null, t('index')),
-          h(Input, { type: 'search', 'aria-label': t('search'), placeholder: t('search'), value: query, onChange: e => setQuery(e.target.value) }),
-          rows.length === 0 && h('div', null, t('empty')),
-          rows.map(row => h('details', { key: row.id },
-            h('summary', null, row.title, ' · ', row.summary),
-            h('p', { style: { whiteSpace: 'pre-wrap' } }, row.detail),
-            h('p', null, t('source'), ' ', row.session, ' · ', t('turn'), ' ', row.turn),
-            h(Button, { size: 'sm', variant: 'outline', type: 'button', onClick: () => forget(row) }, t('forget'))))),
+        id && h(MemoryPanel, { key: id, id, t }),
       )
     }
 
