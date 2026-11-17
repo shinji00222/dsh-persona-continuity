@@ -9,7 +9,7 @@
 
 ## 本地试用
 
-打包运行 `npm pack`。将生成的 `dsh-persona-continuity-0.2.0-preview.3.tgz` 装入测试 profile，再启动该 profile。已在 DSH 0.2.2-rc.3 宿主验证。
+打包运行 `npm pack`。将生成的 `dsh-persona-continuity-0.2.0-preview.4.tgz` 装入测试 profile，再启动该 profile。已在 DSH 0.2.2-rc.3 宿主验证。
 
 - SQLite 文件位于 `$DSH_HOME/persona-continuity/memory.sqlite`。提炼时会将该轮的有限正文发送给当前会话的模型，召回时会把选中的记忆内容提供给模型。
 - 最新提炼可能需要几十秒。被取消和未完整结束的轮次跳过提炼。已开始的会话沿用绑定的人格设定版本。
@@ -18,6 +18,10 @@
 - 实现和调研参考见 [调研](docs/research.md)，阶段与验收见 [规划](docs/project-plan.md)。
 
 开发验证使用 `npm run check` 和 `npm test`。
+
+## 查询旧对话
+
+选好人格后可以说「读往前第 3 段会话」「找之前聊 SQLite 的那段」或「查对话：模型配置」。按标题和关键词查找时，搜索当前工作区中该人格最近 24 段会话。也可提供会话 ID。宿主把原文片段与来源送进模型请求。普通会话关闭这项功能。
 
 ## 模拟任务
 
