@@ -1,6 +1,6 @@
 {
   "name": "dsh-persona-continuity",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "engines": {
@@ -31,7 +31,8 @@
     },
     "client": {
       "platform": "web",
-      "immediately": true
+      "immediately": true,
+      "external": ["@deepseek-ai/dsh-client-ui-primitives"]
     }
   }
 }

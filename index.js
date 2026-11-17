@@ -116,6 +116,12 @@ export function apply(ctx) {
     }).finally(() => { draining = false })
   }
 
+  function requireDraft(id) {
+    const agent = ctx.agents.get(id)
+    if (!canBind(ctx.sessions.get(id), agent)) throw new Error('请在新会话发出首条消息前选择人格')
+    return agent
+  }
+
   const api = {
     state(id) {
       const session = id ? ctx.sessions.get(id) : undefined
@@ -126,12 +132,20 @@ export function apply(ctx) {
       }
     },
     bind(id, persona) {
-      if (!canBind(ctx.sessions.get(id), ctx.agents.get(id))) throw new Error('请在新会话发出首条消息前选择人格')
+      const agent = requireDraft(id)
       store.bind(id, persona)
-      const agent = ctx.agents.get(id)
       if (agent && persona) attach(agent)
       if (!persona) detach(id)
       return api.state(id)
+    },
+    create(session, name) {
+      const agent = requireDraft(session)
+      store.transaction(() => {
+        const persona = store.savePersona('', name, '')
+        store.bind(session, persona)
+        if (agent) attach(agent)
+      })
+      return api.state(session)
     },
     save: (id, name, instructions) => store.savePersona(id, name, instructions),
     list: (persona, query) => store.search(persona, '', query),
