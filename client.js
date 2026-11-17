@@ -11,7 +11,7 @@ window.__ModuleLoader__.load({
     const createOption = '__create__'
 
     async function call(path, data) {
-      const headers = { 'x-dsh-persona-continuity': '1' }
+      const headers = {}
       const options = { headers }
       if (data !== undefined) {
         options.method = 'POST'
@@ -19,8 +19,8 @@ window.__ModuleLoader__.load({
         headers['content-type'] = 'application/json'
       }
       const response = await fetch(base + path, options)
-      const result = await response.json()
-      if (!response.ok) throw new Error(result.error || '无法读取人格记忆')
+      const result = await response.json().catch(() => null)
+      if (!response.ok || result === null) throw new Error(result?.error || '无法读取人格记忆')
       return result
     }
 
@@ -28,20 +28,20 @@ window.__ModuleLoader__.load({
       zh: {
         title: '人格续忆', normal: '普通会话', persona: '人格', new: '新建人格', name: '名称', instructions: '人格设定',
         close: '关闭', cancel: '取消', createAndUse: '创建并使用', namePlaceholder: '输入人格名称',
+        rename: '重命名', renamePersona: '重命名人格',
         save: '保存人格', index: '记忆索引', search: '查找记忆', forget: '删除记忆', confirm: '删除这条长期记忆？',
         empty: '暂无匹配记忆', source: '来源会话', turn: '轮次', locked: '已开始的会话沿用原人格',
-        pending: '待确认记忆', pendingEmpty: '暂无待确认记忆', approve: '批准', reject: '拒绝',
-        edit: '编辑', editApprove: '编辑后批准', saveMemory: '保存记忆', revision: '修订已有记忆',
+        edit: '编辑', saveMemory: '保存记忆',
         memoryTitle: '标题', summary: '摘要', detail: '详情', loading: '加载中…',
       },
       en: {
         title: 'Persona Continuity', normal: 'Standard chat', persona: 'Persona', new: 'New persona', name: 'Name',
         close: 'Close', cancel: 'Cancel', createAndUse: 'Create and use', namePlaceholder: 'Enter a persona name',
+        rename: 'Rename', renamePersona: 'Rename persona',
         instructions: 'Persona instructions', save: 'Save persona', index: 'Memory index', search: 'Search memories',
         forget: 'Forget', confirm: 'Delete this long-term memory?', empty: 'No matching memories', source: 'Source chat',
         turn: 'Turn', locked: 'The persona is fixed after the chat starts',
-        pending: 'Memories for review', pendingEmpty: 'No memories awaiting review', approve: 'Approve', reject: 'Reject',
-        edit: 'Edit', editApprove: 'Edit and approve', saveMemory: 'Save memory', revision: 'Revises a saved memory',
+        edit: 'Edit', saveMemory: 'Save memory',
         memoryTitle: 'Title', summary: 'Summary', detail: 'Details', loading: 'Loading…',
       },
     }
@@ -63,6 +63,8 @@ window.__ModuleLoader__.load({
       const [error, setError] = useState('')
       const [mode, setMode] = useState(null)
       const [name, setName] = useState('')
+      const [renameId, setRenameId] = useState('')
+      const [renamePoint, setRenamePoint] = useState(null)
       const formId = useId()
 
       useEffect(() => {
@@ -98,14 +100,22 @@ window.__ModuleLoader__.load({
         }
       }
 
-      async function create(event) {
+      async function saveName(event) {
         event.preventDefault()
         const title = name.trim()
         if (pending || !title) return
         setPending(true)
         setError('')
         try {
-          setState(await call('/create', { session: sessionId, name: title }))
+          if (mode === 'rename') {
+            await call('/persona', { id: renameId, name: title })
+            setState(current => ({
+              ...current,
+              personas: current.personas.map(persona => persona.id === renameId ? { ...persona, name: title } : persona),
+            }))
+          } else {
+            setState(await call('/create', { session: sessionId, name: title }))
+          }
           setMode(null)
           window.dispatchEvent(new Event(changedEvent))
         } catch (failure) {
@@ -115,7 +125,7 @@ window.__ModuleLoader__.load({
         }
       }
 
-      function closeCreate() {
+      function closeName() {
         if (pending) return
         setMode(null)
         setError('')
@@ -123,14 +133,41 @@ window.__ModuleLoader__.load({
 
       const selected = state.personas.find(persona => persona.id === state.selected)
       const label = selected?.name ?? t('normal')
-      return h('div', { style: pickerStyle },
+      const renaming = mode === 'rename'
+      function openRenameMenu(event) {
+        if (pending || !(event.target instanceof Element)) return
+        const row = event.target.closest('[role="menuitem"], [data-persona-picker]')
+        const target = row?.querySelector('[data-persona-id]')?.dataset.personaId
+        const persona = state.personas.find(item => item.id === target)
+        if (!persona) return
+        event.preventDefault()
+        event.stopPropagation()
+        const rect = row.getBoundingClientRect()
+        setRenamePoint(event.clientX || event.clientY
+          ? { x: event.clientX, y: event.clientY }
+          : { x: rect.left, y: rect.bottom })
+        setRenameId(persona.id)
+        setName(persona.name)
+        setError('')
+        setMode('context')
+      }
+
+      return h('div', {
+        style: pickerStyle,
+        onContextMenu: openRenameMenu,
+        onKeyDownCapture: event => {
+          if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) openRenameMenu(event)
+        },
+      },
         h(Menu, {
           open: mode === 'menu',
           onClose: () => setMode(current => current === 'menu' ? null : current),
           items: [
             { id: normalOption, label: t('normal') },
             { id: createOption, label: t('new'), icon: h(IconPlusOutlineRegular, { size: 16, 'aria-hidden': true }) },
-            ...state.personas.map(persona => ({ id: persona.id, label: persona.name })),
+            ...state.personas.map(persona => ({
+              id: persona.id, label: h('span', { 'data-persona-id': persona.id }, persona.name),
+            })),
           ],
           selectedId: state.selected || normalOption,
           onSelect: id => {
@@ -147,20 +184,34 @@ window.__ModuleLoader__.load({
             size: 'sm', type: 'button', style: choiceStyle,
             'aria-label': t('persona') + '：' + label, 'aria-haspopup': 'menu', 'aria-expanded': mode === 'menu',
             title: state.editable ? label : t('locked'),
-            disabled: pending || !state.editable,
-            onClick: () => { setError(''); setMode(mode === 'menu' ? null : 'menu') },
+            disabled: pending,
+            'aria-disabled': !state.editable,
+            'data-persona-picker': '',
+            onClick: () => {
+              if (!state.editable) return
+              setError('')
+              setMode(mode === 'menu' ? null : 'menu')
+            },
           },
-          h('span', { style: labelStyle }, label),
+          h('span', { style: labelStyle, 'data-persona-id': selected?.id }, label),
           h(IconChevronDownOutlineRegular, { size: 14, 'aria-hidden': true })),
         }),
-        mode !== 'create' && errorMessage(error),
+        h(Menu, {
+          anchor: null, anchorPoint: renamePoint, contextual: true, portal: true, autoFocus: true,
+          open: mode === 'context', items: [{ id: 'rename', label: t('rename') }],
+          onClose: () => setMode(current => current === 'context' ? null : current),
+          onSelect: () => setMode('rename'),
+        }),
+        mode !== 'create' && !renaming && errorMessage(error),
         h(Modal, {
-          title: t('new'), closeLabel: t('close'), open: mode === 'create', onClose: closeCreate,
+          title: t(renaming ? 'renamePersona' : 'new'), closeLabel: t('close'),
+          open: mode === 'create' || renaming, onClose: closeName,
           footer: h(React.Fragment, null,
-            h(Button, { variant: 'outline', disabled: pending, onClick: closeCreate }, t('cancel')),
-            h(Button, { variant: 'primary', type: 'submit', form: formId, disabled: pending || !name.trim() }, t('createAndUse'))),
+            h(Button, { variant: 'outline', disabled: pending, onClick: closeName }, t('cancel')),
+            h(Button, { variant: 'primary', type: 'submit', form: formId, disabled: pending || !name.trim() },
+              t(renaming ? 'rename' : 'createAndUse'))),
         },
-        h('form', { id: formId, onSubmit: create, style: { display: 'grid', gap: 8 } },
+        h('form', { id: formId, onSubmit: saveName, style: { display: 'grid', gap: 8 } },
           h(Input, {
             'aria-label': t('name'), 'data-modal-autofocus': '', placeholder: t('namePlaceholder'),
             value: name, required: true, maxLength: 48, onChange: event => setName(event.target.value),
@@ -173,7 +224,7 @@ window.__ModuleLoader__.load({
     const textareaStyle = { display: 'block', width: '100%' }
     const actionsStyle = { display: 'flex', gap: 8, flexWrap: 'wrap' }
 
-    function MemoryCard({ row, pending, t, mutate }) {
+    function MemoryCard({ row, t, mutate }) {
       const [edits, setEdits] = useState(null)
       const [busy, setBusy] = useState(false)
       const [error, setError] = useState('')
@@ -183,12 +234,12 @@ window.__ModuleLoader__.load({
         setError('')
       }
 
-      async function submit(path, action, value) {
+      async function submit(path, value) {
         if (busy) return
         setBusy(true)
         setError('')
         try {
-          await mutate(path, { id: row.id, action, edits: value })
+          await mutate(path, { id: row.id, edits: value })
           setEdits(null)
         } catch (failure) {
           setError(failure.message)
@@ -208,27 +259,24 @@ window.__ModuleLoader__.load({
 
       return h('details', null,
         h('summary', null, row.title, ' · ', row.summary),
-        pending && row.base_id && h('p', null, t('revision')),
         h('p', { style: { overflowWrap: 'anywhere' } }, t('source'), ' ', row.session, ' · ', t('turn'), ' ', row.turn),
         edits ? h('form', {
           style: panelStyle, onSubmit: event => {
             event.preventDefault()
-            void submit(pending ? '/review' : '/edit', pending ? 'approve' : undefined, edits)
+            void submit('/edit', edits)
           },
         },
         field('title', 'memoryTitle', 90, Input),
         field('summary', 'summary', 160, Input),
         field('detail', 'detail', 1800, 'textarea', { rows: 5, style: textareaStyle }),
         h('div', { style: actionsStyle },
-          h(Button, { size: 'sm', variant: 'primary', type: 'submit', disabled: busy }, t(pending ? 'approve' : 'saveMemory')),
+          h(Button, { size: 'sm', variant: 'primary', type: 'submit', disabled: busy }, t('saveMemory')),
           button('cancel', () => { setEdits(null); setError('') })),
         ) : h(React.Fragment, null,
           h('p', { style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } }, row.detail),
           h('div', { style: actionsStyle },
-            pending && button('approve', () => submit('/review', 'approve')),
-            button(pending ? 'editApprove' : 'edit', edit),
-            pending ? button('reject', () => submit('/review', 'reject')) :
-              button('forget', () => { if (window.confirm(t('confirm'))) void submit('/forget') }),
+            button('edit', edit),
+            button('forget', () => { if (window.confirm(t('confirm'))) void submit('/forget') }),
           )),
         errorMessage(error),
       )
@@ -237,21 +285,9 @@ window.__ModuleLoader__.load({
     function MemoryPanel({ id, t }) {
       const [query, setQuery] = useState('')
       const [rows, setRows] = useState(null)
-      const [pending, setPending] = useState(null)
       const [revision, setRevision] = useState(0)
       const [error, setError] = useState('')
       const persona = '?persona=' + encodeURIComponent(id)
-
-      useEffect(() => {
-        let live = true
-        const refresh = () => call('/pending' + persona).then(
-          value => { if (live) setPending(value) },
-          failure => { if (live) setError(failure.message) },
-        )
-        void refresh()
-        const timer = setInterval(refresh, 5000)
-        return () => { live = false; clearInterval(timer) }
-      }, [persona, revision])
 
       useEffect(() => {
         let live = true
@@ -268,18 +304,15 @@ window.__ModuleLoader__.load({
         setRevision(current => current + 1)
       }
 
-      const cards = (entries, isPending) => entries === null ? h('p', null, t('loading')) :
-        entries.length ? entries.map(row => h(MemoryCard, { key: row.id, row, pending: isPending, t, mutate })) :
-          h('p', null, t(isPending ? 'pendingEmpty' : 'empty'))
       return h('div', { style: panelStyle },
-        h('h3', null, t('pending')),
-        cards(pending, true),
         h('h3', null, t('index')),
         h(Input, {
           type: 'search', 'aria-label': t('search'), placeholder: t('search'), value: query, maxLength: 300,
           onChange: event => { setRows(null); setQuery(event.target.value) },
         }),
-        cards(rows, false),
+        rows === null ? h('p', null, t('loading')) : rows.length
+          ? rows.map(row => h(MemoryCard, { key: row.id, row, t, mutate }))
+          : h('p', null, t('empty')),
         errorMessage(error),
       )
     }
