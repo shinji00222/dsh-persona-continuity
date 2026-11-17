@@ -8,6 +8,7 @@ window.__ModuleLoader__.load({
     const base = '/api/persona-continuity'
     const changedEvent = 'persona-continuity:changed'
     const normalOption = '__normal__'
+    const createOption = '__create__'
 
     async function call(path, data) {
       const headers = { 'x-dsh-persona-continuity': '1' }
@@ -43,10 +44,9 @@ window.__ModuleLoader__.load({
       maxWidth: '12em', color: 'inherit', background: 'var(--dsw-alias-background-primary, Canvas)',
       border: '1px solid var(--dsw-alias-border-secondary, GrayText)', borderRadius: 6, padding: '3px 6px',
     }
-    const pickerStyle = { display: 'inline-flex', alignItems: 'center', minWidth: 0, gap: 2 }
+    const pickerStyle = { display: 'inline-flex', alignItems: 'center', minWidth: 0 }
     const choiceStyle = { maxWidth: 'clamp(74px, 13vw, 155px)', padding: '0 6px' }
     const labelStyle = { overflow: 'hidden', minWidth: 0, textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
-    const addStyle = { width: 28, padding: 0, flexShrink: 0 }
     const panelStyle = { display: 'grid', gap: 12, maxWidth: 720 }
     const errorMessage = error => error ? h('span', { role: 'alert' }, error) : null
     const statePath = id => '/state?session=' + encodeURIComponent(id ?? '')
@@ -119,11 +119,23 @@ window.__ModuleLoader__.load({
       const label = selected?.name ?? t('normal')
       return h('div', { style: pickerStyle },
         h(Menu, {
-          open: mode === 'menu', onClose: () => setMode(null),
-          items: [{ id: normalOption, label: t('normal') },
-            ...state.personas.map(persona => ({ id: persona.id, label: persona.name }))],
+          open: mode === 'menu',
+          onClose: () => setMode(current => current === 'menu' ? null : current),
+          items: [
+            { id: normalOption, label: t('normal') },
+            { id: createOption, label: t('new'), icon: h(IconPlusOutlineRegular, { size: 16, 'aria-hidden': true }) },
+            ...state.personas.map(persona => ({ id: persona.id, label: persona.name })),
+          ],
           selectedId: state.selected || normalOption,
-          onSelect: id => { void select(id === normalOption ? '' : id) },
+          onSelect: id => {
+            if (id !== createOption) {
+              void select(id === normalOption ? '' : id)
+              return
+            }
+            setName('')
+            setError('')
+            setMode('create')
+          },
           align: 'start', portal: true,
           anchor: h(Button, {
             size: 'sm', type: 'button', style: choiceStyle,
@@ -135,11 +147,6 @@ window.__ModuleLoader__.load({
           h('span', { style: labelStyle }, label),
           h(IconChevronDownOutlineRegular, { size: 14, 'aria-hidden': true })),
         }),
-        state.editable && h(Button, {
-          size: 'sm', type: 'button', style: addStyle, title: t('new'), 'aria-label': t('new'), 'aria-haspopup': 'dialog',
-          disabled: pending,
-          onClick: () => { setName(''); setError(''); setMode('create') },
-        }, h(IconPlusOutlineRegular, { size: 16, 'aria-hidden': true })),
         mode !== 'create' && errorMessage(error),
         h(Modal, {
           title: t('new'), closeLabel: t('close'), open: mode === 'create', onClose: closeCreate,
