@@ -5,7 +5,7 @@ import { Store } from './lib/store.js'
 import { extract, rememberableInput, textBlocks } from './lib/extract.js'
 import { registerWeb } from './lib/web.js'
 import { createSimulation } from './lib/simulation.js'
-import { historyRequest, listSessionsForImport, readConversationChunks, retrieveHistory } from './lib/history.js'
+import { chunksFromEvents, historyRequest, listSessionsForImport, readConversationChunks, retrieveHistory } from './lib/history.js'
 
 export const name = 'persona-continuity'
 export const inject = ['agents', 'sessions', 'systemPrompt', 'llm', 'connection', 'sessionQuery']
@@ -151,6 +151,46 @@ export function apply(ctx) {
     if (nextPersona === '') return
   }
 
+  function queueChunks({ persona, sessionId, workspace, target, chunks }) {
+    let queuedChunks = 0
+    let duplicateChunks = 0
+    let nextTurn = store.nextImportTurn(sessionId)
+    for (const chunk of chunks) {
+      const hash = createHash('sha256').update(chunk.user + '\n\0\n' + chunk.assistant).digest('hex')
+      if (store.isImported(persona, sessionId, hash)) {
+        duplicateChunks++
+        continue
+      }
+      const added = store.enqueue({
+        session: sessionId,
+        turn: nextTurn--,
+        persona,
+        workspace,
+        provider: target.provider,
+        model: target.model,
+        input: JSON.stringify({ user: chunk.user, assistant: chunk.assistant }),
+        source: 'import',
+        chunk_hash: hash,
+      })
+      if (added) queuedChunks++
+      else duplicateChunks++
+    }
+    return { queuedChunks, duplicateChunks }
+  }
+
+  function enqueueSessionHistory(sessionId, persona) {
+    const session = ctx.sessions.get(sessionId)
+    if (!session || !hasHistory(session)) return
+    const target = resolveModel(sessionId)
+    if (!target) return
+    const chunks = chunksFromEvents(session.snapshotEvents(), session.header?.inheritedEventCount ?? 0)
+    if (!chunks.length) return
+    const { queuedChunks } = queueChunks({
+      persona, sessionId, workspace: session.header?.cwd ?? '', target, chunks,
+    })
+    if (queuedChunks > 0) queueMicrotask(drain)
+  }
+
   const api = {
     state(id) {
       const { idle, hasHistory: started, bound } = bindingStatus(id)
@@ -171,16 +211,19 @@ export function apply(ctx) {
       store.bind(id, persona)
       if (agent && persona) attach(agent)
       if (!persona) detach(id)
+      if (persona) enqueueSessionHistory(id, persona)
       return api.state(id)
     },
     create(session, name) {
       assertCanBind(session, '__new__')
       const agent = ctx.agents.get(session)
+      let personaId = ''
       store.transaction(() => {
-        const persona = store.savePersona('', name, '')
-        store.bind(session, persona)
+        personaId = store.savePersona('', name, '')
+        store.bind(session, personaId)
         if (agent) attach(agent)
       })
+      enqueueSessionHistory(session, personaId)
       return api.state(session)
     },
     save: (id, name, instructions) => store.savePersona(id, name, instructions),
@@ -234,27 +277,11 @@ export function apply(ctx) {
           skipped.push({ id: sessionId, reason: 'empty' })
           continue
         }
-        for (let i = 0; i < read.chunks.length; i++) {
-          const chunk = read.chunks[i]
-          const hash = createHash('sha256').update(chunk.user + '\n\0\n' + chunk.assistant).digest('hex')
-          if (store.isImported(persona, sessionId, hash)) {
-            duplicateChunks++
-            continue
-          }
-          const added = store.enqueue({
-            session: sessionId,
-            turn: -(i + 1),
-            persona,
-            workspace: read.workspace,
-            provider: target.provider,
-            model: target.model,
-            input: JSON.stringify({ user: chunk.user, assistant: chunk.assistant }),
-            source: 'import',
-            chunk_hash: hash,
-          })
-          if (added) queuedChunks++
-          else duplicateChunks++
-        }
+        const counts = queueChunks({
+          persona, sessionId, workspace: read.workspace, target, chunks: read.chunks,
+        })
+        queuedChunks += counts.queuedChunks
+        duplicateChunks += counts.duplicateChunks
       }
       if (queuedChunks > 0) queueMicrotask(drain)
       return { boundSessions, queuedChunks, duplicateChunks, skipped }

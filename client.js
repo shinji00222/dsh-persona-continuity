@@ -9,7 +9,6 @@ window.__ModuleLoader__.load({
     const changedEvent = 'persona-continuity:changed'
     const normalOption = '__normal__'
     const createOption = '__create__'
-    const importCurrentOption = '__import_current__'
     const simulationPanel = 'persona-continuity-simulation'
 
     async function call(path, data) {
@@ -39,7 +38,7 @@ window.__ModuleLoader__.load({
         cannotImportBound: '（不可导入）',
         edit: '编辑', saveMemory: '保存记忆',
         memoryTitle: '标题', summary: '摘要', detail: '详情', loading: '加载中…',
-        importCurrent: '提炼本对话记忆', importHistory: '从旧对话导入记忆',
+        importHistory: '从旧对话导入记忆',
         importHistoryTitle: '选择旧对话加入记忆', importAction: '绑定并提炼记忆',
         importing: '提炼中…', filterChats: '筛选旧对话标题', noChats: '暂无可导入的旧对话',
         unbound: '未绑定',
@@ -61,7 +60,7 @@ window.__ModuleLoader__.load({
         cannotImportBound: ' (cannot import)',
         edit: 'Edit', saveMemory: 'Save memory',
         memoryTitle: 'Title', summary: 'Summary', detail: 'Details', loading: 'Loading…',
-        importCurrent: 'Extract memories from chat', importHistory: 'Import from past chats',
+        importHistory: 'Import from past chats',
         importHistoryTitle: 'Import memories from past chats', importAction: 'Bind & extract',
         importing: 'Extracting…', filterChats: 'Filter past chats', noChats: 'No past chats found',
         unbound: 'Unbound',
@@ -105,8 +104,6 @@ window.__ModuleLoader__.load({
       const [state, setState] = useState(null)
       const [pending, setPending] = useState(false)
       const [error, setError] = useState('')
-      const [notice, setNotice] = useState('')
-      const [pollingPersona, setPollingPersona] = useState('')
       const [mode, setMode] = useState(null)
       const [name, setName] = useState('')
       const [renameId, setRenameId] = useState('')
@@ -138,35 +135,8 @@ window.__ModuleLoader__.load({
         if (id === state.selected) return
         setPending(true)
         setError('')
-        setNotice('')
         try {
           setState(await call('/bind', { session: sessionId, persona: id }))
-          window.dispatchEvent(new Event(changedEvent))
-        } catch (failure) {
-          setError(failure.message)
-        } finally {
-          setPending(false)
-        }
-      }
-
-      useImportPoll(pollingPersona, Boolean(pollingPersona), () => {
-        setPollingPersona('')
-        setNotice(t('importDone'))
-        window.dispatchEvent(new Event(changedEvent))
-      })
-
-      async function extractCurrent() {
-        setMode(null)
-        if (!state.selected || pending) return
-        setPending(true)
-        setError('')
-        setNotice('')
-        try {
-          const result = await call('/history/import', {
-            persona: state.selected, sessions: [sessionId], activeSession: sessionId,
-          })
-          setNotice(queuedText(t, result))
-          if (result.queuedChunks > 0) setPollingPersona(state.selected)
           window.dispatchEvent(new Event(changedEvent))
         } catch (failure) {
           setError(failure.message)
@@ -217,7 +187,6 @@ window.__ModuleLoader__.load({
         setConfirmBind(null)
         setPending(true)
         setError('')
-        setNotice('')
         try {
           if (task.kind === 'create') {
             setState(await call('/create', { session: sessionId, name: task.name }))
@@ -268,17 +237,12 @@ window.__ModuleLoader__.load({
           items: [
             ...(!state.bindOnce ? [{ id: normalOption, label: t('normal') }] : []),
             { id: createOption, label: t('new'), icon: h(IconPlusOutlineRegular, { size: 16, 'aria-hidden': true }) },
-            ...(state.selected && state.hasHistory ? [{ id: importCurrentOption, label: t('importCurrent') }] : []),
             ...state.personas.map(persona => ({
               id: persona.id, label: h('span', { 'data-persona-id': persona.id }, persona.name),
             })),
           ],
           selectedId: state.selected || normalOption,
           onSelect: id => {
-            if (id === importCurrentOption) {
-              void extractCurrent()
-              return
-            }
             if (id !== createOption) {
               const targetId = id === normalOption ? '' : id
               if (state.bindOnce && targetId) {
@@ -291,7 +255,6 @@ window.__ModuleLoader__.load({
             }
             setName('')
             setError('')
-            setNotice('')
             setMode('create')
           },
           align: 'start', portal: true,
@@ -318,7 +281,6 @@ window.__ModuleLoader__.load({
           onSelect: () => setMode('rename'),
         }),
         mode !== 'create' && !renaming && errorMessage(error),
-        mode !== 'create' && !renaming && notice && h('span', { style: { fontSize: 12, opacity: 0.8, marginLeft: 6 } }, notice),
         h(Modal, {
           title: t(renaming ? 'renamePersona' : 'new'), closeLabel: t('close'),
           open: mode === 'create' || renaming, onClose: closeName,

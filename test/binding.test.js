@@ -424,3 +424,63 @@ test('history lookup turn allows non-history tools, denies native history tools,
   const indexed = await call('GET', `/index?persona=${pA}&q=t2-topic`)
   assert.equal(indexed.length, 1)
 })
+
+test('binding a started standard chat automatically queues its existing history for extraction', async t => {
+  const sStd = makeSession('std', [
+    { type: 'user/message', data: { source: { kind: 'user' }, content: '记住我们项目统一用 SQLite 存本地记忆。' } },
+    { type: 'assistant/message', data: { message: { content: '好的，已经记下使用 SQLite。' } } },
+  ])
+  const sessions = new Map([['std', sStd]])
+  const agents = new Map([['std', makeAgent('std', sStd)]])
+  const llmResult = JSON.stringify([{
+    kind: 'decision',
+    topic: 'storage-engine',
+    title: '使用 SQLite',
+    summary: '项目本地记忆统一用 SQLite 存储',
+    detail: '用户明确要求记住项目统一用 SQLite 存本地记忆。',
+    evidence: '记住我们项目统一用 SQLite 存本地记忆。',
+  }])
+
+  const { callRoute } = createHarness(t, { sessions, agents, llmResult })
+  const pA = (await callRoute('POST', '/persona', { id: '', name: 'A', instructions: '' })).json.id
+  await callRoute('POST', '/bind', { session: 'std', persona: pA })
+  await new Promise(resolve => setTimeout(resolve, 40))
+
+  const list = (await callRoute('GET', `/index?persona=${pA}&q=storage-engine`)).json
+  assert.equal(list.length, 1)
+  assert.equal(list[0].title, '使用 SQLite')
+})
+
+test('importHistory avoids negative turn collision when an earlier import job is still queued', async t => {
+  const sessions = new Map([['host', makeSession('host')]])
+  const agents = new Map([['host', makeAgent('host', sessions.get('host'))]])
+  const observations = {
+    s1: {
+      header: { id: 's1', cwd: 'ws', createdAt: 10 },
+      events: [
+        { type: 'user/message', data: { source: { kind: 'user' }, content: '这是第二段全新的对话内容，需要单独入队。' } },
+        { type: 'assistant/message', data: { message: { content: '收到，这是第二段的回复。' } } },
+      ],
+    },
+  }
+  const { callRoute } = createHarness(t, { sessions, agents, observations })
+  const pA = (await callRoute('POST', '/persona', { id: '', name: 'A', instructions: '' })).json.id
+  const dbPath = join(process.env.DSH_HOME, 'persona-continuity', 'memory.sqlite')
+  const store = new Store(dbPath)
+  store.bind('s1', pA)
+  // Simulate an earlier queued import job at turn = -1 with a different chunk_hash
+  store.enqueue({
+    session: 's1', turn: -1, persona: pA, workspace: 'ws', provider: 'mock', model: 'm1',
+    input: JSON.stringify({ user: '第一段旧内容', assistant: '旧回复' }), source: 'import', chunk_hash: 'old-hash',
+  })
+  store.close()
+
+  const first = (await callRoute('POST', '/history/import', { persona: pA, sessions: ['s1'] })).json
+  assert.equal(first.queuedChunks, 1)
+  assert.equal(first.duplicateChunks, 0)
+
+  // Re-importing the exact same chunk while it is still queued should be deduplicated
+  const second = (await callRoute('POST', '/history/import', { persona: pA, sessions: ['s1'] })).json
+  assert.equal(second.queuedChunks, 0)
+  assert.equal(second.duplicateChunks, 1)
+})
