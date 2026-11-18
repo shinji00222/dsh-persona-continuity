@@ -32,7 +32,11 @@ window.__ModuleLoader__.load({
         close: '关闭', cancel: '取消', createAndUse: '创建并使用', namePlaceholder: '输入人格名称',
         rename: '重命名', renamePersona: '重命名人格',
         save: '保存人格', index: '记忆索引', search: '查找记忆', forget: '删除记忆', confirm: '删除这条长期记忆？',
-        empty: '暂无匹配记忆', source: '来源会话', turn: '轮次', locked: '回复生成期间暂不可切换人格',
+        empty: '暂无匹配记忆', source: '来源会话', turn: '轮次',
+        busy: '回复生成期间暂不可切换人格', lockedStarted: '对话开始后不能更换人格',
+        bindOnceTitle: '确认绑定人格', confirmBind: '确认绑定',
+        bindOnceConfirm: '绑定后本对话不能再更换人格，之前的对话内容会归入该人格。确定？',
+        cannotImportBound: '（不可导入）',
         edit: '编辑', saveMemory: '保存记忆',
         memoryTitle: '标题', summary: '摘要', detail: '详情', loading: '加载中…',
         importCurrent: '提炼本对话记忆', importHistory: '从旧对话导入记忆',
@@ -46,7 +50,11 @@ window.__ModuleLoader__.load({
         rename: 'Rename', renamePersona: 'Rename persona',
         instructions: 'Persona instructions', save: 'Save persona', index: 'Memory index', search: 'Search memories',
         forget: 'Forget', confirm: 'Delete this long-term memory?', empty: 'No matching memories', source: 'Source chat',
-        turn: 'Turn', locked: 'Persona cannot be switched while generating',
+        turn: 'Turn',
+        busy: 'Persona cannot be switched while generating', lockedStarted: 'Persona can’t be changed after the chat starts',
+        bindOnceTitle: 'Confirm persona binding', confirmBind: 'Confirm',
+        bindOnceConfirm: 'Once bound, you cannot change the persona for this chat, and earlier messages will belong to it. Continue?',
+        cannotImportBound: ' (cannot import)',
         edit: 'Edit', saveMemory: 'Save memory',
         memoryTitle: 'Title', summary: 'Summary', detail: 'Details', loading: 'Loading…',
         importCurrent: 'Extract memories from chat', importHistory: 'Import from past chats',
@@ -76,6 +84,7 @@ window.__ModuleLoader__.load({
       const [name, setName] = useState('')
       const [renameId, setRenameId] = useState('')
       const [renamePoint, setRenamePoint] = useState(null)
+      const [confirmBind, setConfirmBind] = useState(null)
       const formId = useId()
 
       useEffect(() => {
@@ -145,6 +154,11 @@ window.__ModuleLoader__.load({
               ...current,
               personas: current.personas.map(persona => persona.id === renameId ? { ...persona, name: title } : persona),
             }))
+          } else if (state.bindOnce) {
+            setPending(false)
+            setMode(null)
+            setConfirmBind({ kind: 'create', name: title })
+            return
           } else {
             setState(await call('/create', { session: sessionId, name: title }))
           }
@@ -163,9 +177,32 @@ window.__ModuleLoader__.load({
         setError('')
       }
 
+      async function runConfirmedBind() {
+        if (!confirmBind || pending) return
+        const task = confirmBind
+        setConfirmBind(null)
+        setPending(true)
+        setError('')
+        setNotice('')
+        try {
+          if (task.kind === 'create') {
+            setState(await call('/create', { session: sessionId, name: task.name }))
+          } else {
+            setState(await call('/bind', { session: sessionId, persona: task.id }))
+          }
+          window.dispatchEvent(new Event(changedEvent))
+        } catch (failure) {
+          setError(failure.message)
+        } finally {
+          setPending(false)
+        }
+      }
+
       const selected = state.personas.find(persona => persona.id === state.selected)
       const label = selected?.name ?? t('normal')
       const renaming = mode === 'rename'
+      const canOpen = Boolean(state.editable || state.bindOnce)
+      const tooltip = canOpen ? label : state.locked ? t('lockedStarted') : t('busy')
       function openRenameMenu(event) {
         if (pending || !(event.target instanceof Element)) return
         const row = event.target.closest('[role="menuitem"], [data-persona-picker]')
@@ -195,7 +232,7 @@ window.__ModuleLoader__.load({
           open: mode === 'menu',
           onClose: () => setMode(current => current === 'menu' ? null : current),
           items: [
-            { id: normalOption, label: t('normal') },
+            ...(!state.bindOnce ? [{ id: normalOption, label: t('normal') }] : []),
             { id: createOption, label: t('new'), icon: h(IconPlusOutlineRegular, { size: 16, 'aria-hidden': true }) },
             ...(state.selected && state.hasHistory ? [{ id: importCurrentOption, label: t('importCurrent') }] : []),
             ...state.personas.map(persona => ({
@@ -209,7 +246,13 @@ window.__ModuleLoader__.load({
               return
             }
             if (id !== createOption) {
-              void select(id === normalOption ? '' : id)
+              const targetId = id === normalOption ? '' : id
+              if (state.bindOnce && targetId) {
+                setMode(null)
+                setConfirmBind({ kind: 'bind', id: targetId })
+              } else {
+                void select(targetId)
+              }
               return
             }
             setName('')
@@ -221,12 +264,12 @@ window.__ModuleLoader__.load({
           anchor: h(Button, {
             size: 'sm', type: 'button', style: choiceStyle,
             'aria-label': t('persona') + '：' + label, 'aria-haspopup': 'menu', 'aria-expanded': mode === 'menu',
-            title: state.editable ? label : t('locked'),
+            title: tooltip,
             disabled: pending,
-            'aria-disabled': !state.editable,
+            'aria-disabled': !canOpen,
             'data-persona-picker': '',
             onClick: () => {
-              if (!state.editable) return
+              if (!canOpen) return
               setError('')
               setMode(mode === 'menu' ? null : 'menu')
             },
@@ -257,6 +300,13 @@ window.__ModuleLoader__.load({
           }),
           errorMessage(error),
         )),
+        h(Modal, {
+          title: t('bindOnceTitle'), closeLabel: t('close'),
+          open: Boolean(confirmBind), onClose: () => { if (!pending) setConfirmBind(null) },
+          footer: h(React.Fragment, null,
+            h(Button, { variant: 'outline', disabled: pending, onClick: () => setConfirmBind(null) }, t('cancel')),
+            h(Button, { variant: 'primary', disabled: pending, onClick: () => { void runConfirmedBind() } }, t('confirmBind'))),
+        }, h('p', { style: { margin: 0 } }, t('bindOnceConfirm'))),
       )
     }
 
@@ -383,20 +433,28 @@ window.__ModuleLoader__.load({
         sessions === null ? h('p', null, t('loading'))
           : !visible.length ? h('p', null, t('noChats'))
           : h('div', { style: { display: 'grid', gap: 6, maxHeight: 320, overflowY: 'auto' } },
-            visible.map(item => h('label', {
-              key: item.id,
-              style: { display: 'flex', alignItems: 'flex-start', gap: 8, padding: '6px 4px', cursor: 'pointer' },
-            },
-            h('input', {
-              type: 'checkbox', checked: selected.includes(item.id), disabled: busy,
-              onChange: () => toggle(item.id),
-            }),
-            h('span', { style: { display: 'grid', gap: 2, minWidth: 0 } },
-              h('strong', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, item.title),
-              h('span', { style: { fontSize: 12, opacity: 0.75 } },
-                new Date(item.createdAt).toLocaleString() + ' · ' +
-                (item.personaId ? (item.personaId === id ? '当前人格' : '已绑定：' + item.personaName) : t('unbound'))),
-            )))),
+            visible.map(item => {
+              const blocked = Boolean(item.personaId && item.personaId !== id)
+              return h('label', {
+                key: item.id,
+                style: {
+                  display: 'flex', alignItems: 'flex-start', gap: 8, padding: '6px 4px',
+                  cursor: blocked ? 'not-allowed' : 'pointer', opacity: blocked ? 0.6 : 1,
+                },
+              },
+              h('input', {
+                type: 'checkbox', checked: selected.includes(item.id), disabled: busy || blocked,
+                onChange: () => toggle(item.id),
+              }),
+              h('span', { style: { display: 'grid', gap: 2, minWidth: 0 } },
+                h('strong', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, item.title),
+                h('span', { style: { fontSize: 12, opacity: 0.75 } },
+                  new Date(item.createdAt).toLocaleString() + ' · ' +
+                  (item.personaId
+                    ? (item.personaId === id ? '当前人格' : '已绑定：' + item.personaName + t('cannotImportBound'))
+                    : t('unbound'))),
+              ))
+            })),
         errorMessage(error),
       ))
     }

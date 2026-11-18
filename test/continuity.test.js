@@ -134,21 +134,19 @@ test('extraction accepts structured replies and rejects partial finishes', async
   await assert.rejects(extract(failed, data, [], new AbortController().signal), /did not finish/)
 })
 
-test('bindingsMap and saveExtractedMemories support mid-session rebind and history import', () => {
+test('bindingsMap and saveExtractedMemories record initial binding and imported memories', () => {
   const store = new Store(':memory:')
   try {
     const a = store.savePersona('', '导师', '')
-    const b = store.savePersona('', '助手', '')
     store.bind('s1', a)
     assert.equal(store.bindingsMap().get('s1')?.persona, a)
-    store.bind('s1', b)
-    assert.equal(store.bindingsMap().get('s1')?.name, '助手')
+    assert.equal(store.bindingsMap().get('s1')?.name, '导师')
     const count = store.saveExtractedMemories({
-      persona: b, session: 's1', turn: 1, workspace: 'demo', created: Date.now(),
+      persona: a, session: 's1', turn: 1, workspace: 'demo', created: Date.now(),
       items: [make('imported-topic', '来自旧对话的决定')],
     })
     assert.equal(count, 1)
-    assert.equal(store.search(b, 'demo', 'imported-topic')[0].detail, '来自旧对话的决定')
+    assert.equal(store.search(a, 'demo', 'imported-topic')[0].detail, '来自旧对话的决定')
   } finally {
     store.close()
   }

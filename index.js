@@ -17,8 +17,8 @@ function supported(session) {
     !String(session.id).startsWith('session-incognito-')
 }
 
-function canBind(session, agent) {
-  if (!supported(session) || session.requestHeader?.()) return false
+function isSessionIdle(session, agent, id, turns) {
+  if (!supported(session) || session.requestHeader?.() || turns.has(id)) return false
   return !(agent?.inbox?.nextTurn?.length || agent?.inbox?.nextStep?.length)
 }
 
@@ -128,33 +128,53 @@ export function apply(ctx) {
     }).finally(() => { draining = false })
   }
 
-  function requireIdle(id) {
-    const agent = ctx.agents.get(id)
-    if (turns.has(id) || !canBind(ctx.sessions.get(id), agent)) {
-      throw new Error('请等待当前回复完成后再切换人格')
+  function bindingStatus(id) {
+    const session = id ? ctx.sessions.get(id) : undefined
+    const agent = id ? ctx.agents.get(id) : undefined
+    return {
+      idle: Boolean(id && isSessionIdle(session, agent, id, turns)),
+      hasHistory: Boolean(session && hasHistory(session)),
+      bound: Boolean(id && store.personaFor(id)),
     }
-    return agent
+  }
+
+  function assertCanBind(id, nextPersona) {
+    const { idle, hasHistory: started, bound } = bindingStatus(id)
+    if (!idle) throw new Error('请等待当前回复完成后再选择人格')
+    if (!started) return
+    const current = store.personaFor(id)?.id ?? ''
+    if (bound) {
+      if (nextPersona === current) return
+      throw new Error('对话开始后不能更换人格')
+    }
+    if (nextPersona === '') return
   }
 
   const api = {
     state(id) {
-      const session = id ? ctx.sessions.get(id) : undefined
+      const { idle, hasHistory: started, bound } = bindingStatus(id)
       return {
         personas: store.personas(),
         selected: id ? store.personaFor(id)?.id ?? '' : '',
-        editable: Boolean(id && !turns.has(id) && canBind(session, ctx.agents.get(id))),
-        hasHistory: Boolean(session && hasHistory(session)),
+        editable: !started && idle,
+        bindOnce: started && !bound && idle,
+        locked: started && bound,
+        hasHistory: started,
       }
     },
     bind(id, persona) {
-      const agent = requireIdle(id)
+      assertCanBind(id, persona)
+      const current = store.personaFor(id)?.id ?? ''
+      if (persona === current) return api.state(id)
+      const agent = ctx.agents.get(id)
       store.bind(id, persona)
       if (agent && persona) attach(agent)
       if (!persona) detach(id)
       return api.state(id)
     },
     create(session, name) {
-      const agent = requireIdle(session)
+      assertCanBind(session, '__new__')
+      const agent = ctx.agents.get(session)
       store.transaction(() => {
         const persona = store.savePersona('', name, '')
         store.bind(session, persona)
@@ -180,16 +200,29 @@ export function apply(ctx) {
       if (!target) throw new Error('请先打开一个已选好模型的对话，再提炼记忆')
 
       let importedSessions = 0
-      let skippedSessions = 0
+      const skipped = []
       let extractedMemories = 0
       for (const sessionId of ids) {
+        const existing = store.personaFor(sessionId)?.id ?? ''
+        if (existing && existing !== persona) {
+          skipped.push({ id: sessionId, reason: 'bound-to-other' })
+          continue
+        }
+        const liveSession = ctx.sessions.get(sessionId)
+        const liveAgent = ctx.agents.get(sessionId)
+        if (turns.has(sessionId) || liveSession?.requestHeader?.() ||
+          liveAgent?.inbox?.nextTurn?.length || liveAgent?.inbox?.nextStep?.length) {
+          skipped.push({ id: sessionId, reason: 'busy' })
+          continue
+        }
         const readSignal = AbortSignal.any([lifetime.signal, AbortSignal.timeout(10000)])
         const { workspace, chunks } = await readConversationChunks(ctx.sessionQuery, sessionId, readSignal)
-        store.bind(sessionId, persona)
-        const agent = ctx.agents.get(sessionId)
-        if (agent) attach(agent)
+        if (!existing) {
+          store.bind(sessionId, persona)
+          if (liveAgent) attach(liveAgent)
+        }
         if (!chunks.length) {
-          skippedSessions++
+          skipped.push({ id: sessionId, reason: 'empty' })
           continue
         }
         for (const chunk of chunks) {
@@ -205,7 +238,7 @@ export function apply(ctx) {
         }
         importedSessions++
       }
-      return { importedSessions, skippedSessions, extractedMemories }
+      return { importedSessions, skippedSessions: skipped.length, skipped, extractedMemories }
     },
   }
 
