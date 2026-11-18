@@ -50,7 +50,7 @@ test('survey snapshots and isolates each role, bounds concurrency and retries on
     simulation.questionnaires.remove(saved.id)
     config.material = 'Edited after submission'
     const first = await settled(id)
-    assert.equal(peak, 2)
+    assert.equal(peak, 6)
     assert.equal(seen.length, 205)
     assert.equal(new Set(seen.map(item => item.role.id)).size, 205)
     assert.ok(seen.every(input => input.material === 'Original' && !Object.hasOwn(input, 'roles')))

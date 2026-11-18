@@ -384,6 +384,42 @@ window.__ModuleLoader__.load({
       { id: 'remaining', text: '还有哪些疑问，或哪一步沟通可以更清楚？' },
     ]
     const sampleMaterial = '这是虚构的门诊沟通场景。就诊结束时，医生介绍了用药安排，并交给患者一份书面说明。双方需要确认患者理解了哪些信息，还有哪些疑问。请评价沟通过程。'
+    const importQuestionnaireOption = '__import_questionnaire__'
+
+    async function readQuestionnaireFile(file) {
+      if (file.size > 180000) throw new Error('问卷文件须小于 180 KB')
+      const text = (await file.text()).replace(/^\uFEFF/u, '')
+      if (/\.json$/iu.test(file.name)) {
+        let imported
+        try { imported = JSON.parse(text) }
+        catch { throw new Error('JSON 格式有误，请检查文件') }
+        if (!imported || !Array.isArray(imported.questions)) throw new Error('JSON 需要包含 questions 题目数组')
+        return {
+          title: imported.title,
+          material: imported.material,
+          questions: imported.questions.map(question => ({
+            id: question?.id ?? crypto.randomUUID(),
+            text: question?.text,
+            options: question?.options,
+          })),
+        }
+      }
+      if (!/\.tsv$/iu.test(file.name)) throw new Error('请选择 JSON 或 TSV 文件')
+      const lines = text.split(/\r?\n/u).filter(line => line.trim())
+      if (lines[0]?.trim() !== '题干\t题型\t选项') throw new Error('TSV 表头须为「题干、题型、选项」三列')
+      const questions = lines.slice(1).map((line, index) => {
+        const [text, kind, choices = '', ...extra] = line.split('\t').map(cell => cell.trim())
+        if (extra.length || !text || !['单选题', '开放题'].includes(kind) ||
+          (kind === '开放题' && choices)) {
+          throw new Error('第 ' + (index + 2) + ' 行的题干、题型或选项格式有误')
+        }
+        return {
+          id: crypto.randomUUID(), text,
+          options: kind === '单选题' ? choices.split('|').map(choice => choice.trim()) : [],
+        }
+      })
+      return { title: file.name.replace(/\.tsv$/iu, '').slice(0, 100), material: '', questions }
+    }
     const surveyColumns = {
       display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))',
       gap: 20, alignItems: 'start',
@@ -682,11 +718,15 @@ window.__ModuleLoader__.load({
       const [cohort, setCohort] = useState(null)
       const [questionnaireId, setQuestionnaireId] = useState('')
       const [questionnaireMenu, setQuestionnaireMenu] = useState(false)
+      const [importOpen, setImportOpen] = useState(false)
+      const [importFile, setImportFile] = useState(null)
+      const [importError, setImportError] = useState('')
       const [notice, setNotice] = useState('')
       const batches = useSurveyLibrary('batches')
       const questionnaires = useSurveyLibrary('questionnaires')
       const [models, setModels] = useState(null)
       const [model, setModel] = useState('')
+      const [concurrency, setConcurrency] = useState('6')
       const [runs, setRuns] = useState([])
       const [id, setId] = useState('')
       const [result, setResult] = useState(null)
@@ -735,7 +775,7 @@ window.__ModuleLoader__.load({
         setBusy(true)
         setError('')
         try {
-          const task = { title, material, ...models[model], roles, questions }
+          const task = { title, material, ...models[model], roles, questions, concurrency: Number(concurrency) }
           const run = await call('/simulation/run', task)
           setRuns(previous => [{ id: run.id, title: title.trim() }, ...previous].slice(0, 30))
           setResult(null)
@@ -772,6 +812,14 @@ window.__ModuleLoader__.load({
         try { await operation() } catch (failure) { setError(failure.message) }
         finally { setBusy(false) }
       }
+      function applyQuestionnaire(draft, id = '') {
+        setQuestionnaireId(id)
+        setTitle(draft.title)
+        setMaterial(draft.material)
+        setQuestions(draft.questions.map(question => ({
+          ...question, options: question.options?.length ? question.options : null,
+        })))
+      }
       function openQuestionnaire(id) {
         if (!id) {
           setQuestionnaireId('')
@@ -780,12 +828,7 @@ window.__ModuleLoader__.load({
         }
         void manageQuestionnaire(async () => {
           const saved = await questionnaires.read(id)
-          setQuestionnaireId(saved.id)
-          setTitle(saved.title)
-          setMaterial(saved.material)
-          setQuestions(saved.questions.map(question => ({
-            ...question, options: question.options.length ? question.options : null,
-          })))
+          applyQuestionnaire(saved, saved.id)
         })
       }
       function saveQuestionnaire(id) {
@@ -799,6 +842,12 @@ window.__ModuleLoader__.load({
 
       function chooseQuestionnaire(id) {
         setQuestionnaireMenu(false)
+        if (id === importQuestionnaireOption) {
+          setImportFile(null)
+          setImportError('')
+          setImportOpen(true)
+          return
+        }
         if (id !== createOption) {
           if (id !== (questionnaireId || normalOption)) openQuestionnaire(id === normalOption ? '' : id)
           return
@@ -809,6 +858,24 @@ window.__ModuleLoader__.load({
         setQuestions([{ id: crypto.randomUUID(), text: '', options: ['', ''] }])
         setNotice('')
         setError('')
+      }
+
+      async function importQuestionnaire() {
+        if (!importFile || busy) return
+        setBusy(true)
+        setImportError('')
+        try {
+          const draft = await readQuestionnaireFile(importFile)
+          const checked = await call('/simulation/questionnaires/validate', draft)
+          applyQuestionnaire(checked)
+          setImportOpen(false)
+          setError('')
+          setNotice('已导入 ' + checked.questions.length + ' 道题，可编辑后保存')
+        } catch (failure) {
+          setImportError(failure.message)
+        } finally {
+          setBusy(false)
+        }
       }
 
       const done = result?.jobs.filter(job => job.status === 'done' || job.status === 'failed').length ?? 0
@@ -849,6 +916,7 @@ window.__ModuleLoader__.load({
                     items: [
                       { id: normalOption, label: '当前草稿' },
                       { id: createOption, label: '新建空白问卷', icon: h(IconPlusOutlineRegular, { size: 16, 'aria-hidden': true }) },
+                      { id: importQuestionnaireOption, label: '导入问卷' },
                       ...questionnaires.items.map(item => ({ id: item.id, label: item.title + ' · ' + item.count + ' 题' })),
                     ],
                     anchor: h(Button, {
@@ -877,6 +945,7 @@ window.__ModuleLoader__.load({
             h('option', { value: '', disabled: true }, models === null ? '正在加载模型…' : models.length ? '选择模型' : '请先在 DSH 配置模型'),
             (models ?? []).map((item, index) => h('option', { key: item.provider + '/' + item.model, value: String(index) }, item.label + ' · ' + item.provider))))),
               field('公共材料', surveyText(material, setMaterial, 3, 6000)),
+              field('并行作答数', surveyInput(concurrency, setConcurrency, { type: 'number', required: true, min: 1, max: 12, step: 1 })),
               h('div', { style: actionsStyle },
                 h(Button, { type: 'submit', variant: 'primary', disabled: busy || !models?.[model] }, busy ? '处理中…' : '运行问卷'),
                 h('span', null, roles.length + ' 个角色 · ' + questions.length + ' 道题'))),
@@ -899,6 +968,7 @@ window.__ModuleLoader__.load({
                 action('导出答卷 CSV', () => downloadSurveyResults(result))),
               h('label', null, '已处理 ' + done + ' / ' + result.jobs.length,
                 h('progress', { value: done, max: result.jobs.length, style: textareaStyle })),
+              h('p', null, '并行上限 ' + result.concurrency + ' · 正在作答 ' + result.jobs.filter(job => job.status === 'running').length),
               action('前往校准', () => setTab('calibration')),
               result.jobs.length > 20 && h('div', { style: actionsStyle },
                 action('上一页答卷', () => setAnswerPage(page => page - 1), answerPage === 0),
@@ -918,6 +988,18 @@ window.__ModuleLoader__.load({
             key: JSON.stringify([id, cohort]), result, runId: id, cohort, saved: activeCalibration,
             onSaved: () => setRefresh(value => value + 1),
           }),
+          importOpen && h(Modal, {
+            title: '导入问卷', closeLabel: '关闭', open: true,
+            onClose: () => { if (!busy) setImportOpen(false) },
+            footer: h(React.Fragment, null,
+              action('取消', () => setImportOpen(false), busy),
+              h(Button, { type: 'button', variant: 'primary', disabled: !importFile || busy, onClick: importQuestionnaire }, '导入到新草稿')),
+          }, h('div', { style: { display: 'grid', gap: 12 } },
+            h('p', null, 'JSON 支持问卷名称、公共材料和题目。TSV 使用「题干、题型、选项」三列，单选题选项用 | 分隔，开放题的选项留空。'),
+            h('p', null, '导入会替换当前编辑区，保存后可在问卷列表找到。'),
+            field('问卷文件', h('input', { type: 'file', accept: '.json,.tsv', disabled: busy,
+              onChange: event => { setImportFile(event.target.files[0] ?? null); setImportError('') } })),
+            errorMessage(importError))),
         ),
       )
     }
