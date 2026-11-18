@@ -18,22 +18,17 @@ function supported(session) {
     !String(session.id).startsWith('session-incognito-')
 }
 
-function hasActiveTurn(session) {
+function hasActiveTurnEvents(events) {
   let active = false
-  for (const event of session?.snapshotEvents?.() ?? []) {
+  for (const event of events ?? []) {
     if (event.type === 'turn/start') active = true
     else if (event.type === 'turn/end') active = false
   }
   return active
 }
 
-function isSessionIdle(session, agent, id, turns) {
-  if (!supported(session) || turns.has(id) || hasActiveTurn(session)) return false
-  return !(agent?.inbox?.nextTurn?.length || agent?.inbox?.nextStep?.length)
-}
-
-function hasHistory(session) {
-  return Boolean(session?.snapshotEvents?.().some(event =>
+function hasHistoryEvents(events) {
+  return Boolean(events?.some(event =>
     event.type === 'user/message' || event.type === 'assistant/message'))
 }
 
@@ -138,26 +133,67 @@ export function apply(ctx) {
     }).finally(() => { draining = false })
   }
 
-  function bindingStatus(id) {
-    const session = id ? ctx.sessions.get(id) : undefined
+  async function inspectSession(id) {
+    if (!id) return null
+    const live = ctx.sessions.get(id)
+    if (live) {
+      const events = live.snapshotEvents?.() ?? []
+      return {
+        supported: supported(live),
+        hasHistory: hasHistoryEvents(events),
+        hasActiveTurn: hasActiveTurnEvents(events),
+        workspace: live.header?.cwd ?? '',
+        chunks: () => chunksFromEvents(events, live.header?.inheritedEventCount ?? 0),
+      }
+    }
+    if (String(id).startsWith('session-incognito-')) {
+      return { supported: false, hasHistory: false, hasActiveTurn: false, workspace: '', chunks: () => [] }
+    }
+    try {
+      const signal = AbortSignal.any([lifetime.signal, AbortSignal.timeout(4000)])
+      const obs = await ctx.sessionQuery.observeSession(id, { signal, projectionMode: 'none' })
+      try {
+        const events = obs.events ?? []
+        const inherited = obs.inheritedEventCount ?? 0
+        return {
+          supported: Boolean(obs.header && !obs.header.origin && !obs.header.parentSession &&
+            !String(obs.header.id).startsWith('session-incognito-')),
+          hasHistory: hasHistoryEvents(events),
+          hasActiveTurn: hasActiveTurnEvents(events),
+          workspace: obs.header?.cwd ?? '',
+          chunks: () => chunksFromEvents(events, inherited),
+        }
+      } finally {
+        obs[Symbol.dispose]()
+      }
+    } catch {
+      return { supported: true, hasHistory: false, hasActiveTurn: false, workspace: '', chunks: () => [] }
+    }
+  }
+
+  async function bindingStatus(id) {
+    const info = await inspectSession(id)
     const agent = id ? ctx.agents.get(id) : undefined
+    const busy = !info || !info.supported || turns.has(id) || info.hasActiveTurn ||
+      Boolean(agent?.inbox?.nextTurn?.length || agent?.inbox?.nextStep?.length)
     return {
-      idle: Boolean(id && isSessionIdle(session, agent, id, turns)),
-      hasHistory: Boolean(session && hasHistory(session)),
+      info,
+      idle: Boolean(id && !busy),
+      hasHistory: Boolean(info?.hasHistory),
       bound: Boolean(id && store.personaFor(id)),
     }
   }
 
-  function assertCanBind(id, nextPersona) {
-    const { idle, hasHistory: started, bound } = bindingStatus(id)
+  async function assertCanBind(id, nextPersona) {
+    const { info, idle, hasHistory: started, bound } = await bindingStatus(id)
     if (!idle) throw new Error('请等待当前回复完成后再选择人格')
-    if (!started) return
+    if (!started) return info
     const current = store.personaFor(id)?.id ?? ''
     if (bound) {
-      if (nextPersona === current) return
+      if (nextPersona === current) return info
       throw new Error('对话开始后不能更换人格')
     }
-    if (nextPersona === '') return
+    return info
   }
 
   function queueChunks({ persona, sessionId, workspace, target, chunks }) {
@@ -187,22 +223,21 @@ export function apply(ctx) {
     return { queuedChunks, duplicateChunks }
   }
 
-  function enqueueSessionHistory(sessionId, persona) {
-    const session = ctx.sessions.get(sessionId)
-    if (!session || !hasHistory(session)) return
+  function enqueueSessionHistory(sessionId, persona, info) {
+    if (!info?.hasHistory) return
     const target = resolveModel(sessionId)
     if (!target) return
-    const chunks = chunksFromEvents(session.snapshotEvents(), session.header?.inheritedEventCount ?? 0)
+    const chunks = info.chunks()
     if (!chunks.length) return
     const { queuedChunks } = queueChunks({
-      persona, sessionId, workspace: session.header?.cwd ?? '', target, chunks,
+      persona, sessionId, workspace: info.workspace, target, chunks,
     })
     if (queuedChunks > 0) queueMicrotask(drain)
   }
 
   const api = {
-    state(id) {
-      const { idle, hasHistory: started, bound } = bindingStatus(id)
+    async state(id) {
+      const { idle, hasHistory: started, bound } = await bindingStatus(id)
       return {
         personas: store.personas(),
         selected: id ? store.personaFor(id)?.id ?? '' : '',
@@ -212,19 +247,19 @@ export function apply(ctx) {
         hasHistory: started,
       }
     },
-    bind(id, persona) {
-      assertCanBind(id, persona)
+    async bind(id, persona) {
+      const info = await assertCanBind(id, persona)
       const current = store.personaFor(id)?.id ?? ''
       if (persona === current) return api.state(id)
       const agent = ctx.agents.get(id)
       store.bind(id, persona)
       if (agent && persona) attach(agent)
       if (!persona) detach(id)
-      if (persona) enqueueSessionHistory(id, persona)
+      if (persona) enqueueSessionHistory(id, persona, info)
       return api.state(id)
     },
-    create(session, name) {
-      assertCanBind(session, '__new__')
+    async create(session, name) {
+      const info = await assertCanBind(session, '__new__')
       const agent = ctx.agents.get(session)
       let personaId = ''
       store.transaction(() => {
@@ -232,7 +267,7 @@ export function apply(ctx) {
         store.bind(session, personaId)
         if (agent) attach(agent)
       })
-      enqueueSessionHistory(session, personaId)
+      enqueueSessionHistory(session, personaId, info)
       return api.state(session)
     },
     save: (id, name, instructions) => store.savePersona(id, name, instructions),

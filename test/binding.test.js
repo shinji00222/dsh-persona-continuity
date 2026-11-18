@@ -486,3 +486,38 @@ test('importHistory avoids negative turn collision when an earlier import job is
   assert.equal(second.queuedChunks, 0)
   assert.equal(second.duplicateChunks, 1)
 })
+
+test('cold persisted standard session not yet in ctx.sessions supports bindOnce and auto-extraction', async t => {
+  const sHost = makeSession('host')
+  const sessions = new Map([['host', sHost]])
+  const agents = new Map([['host', makeAgent('host', sHost)]])
+  const observations = {
+    cold: {
+      header: { id: 'cold', cwd: 'ws', createdAt: 10 },
+      events: [
+        { type: 'user/message', data: { source: { kind: 'user' }, content: '记住冷启动的旧普通会话也要能绑定人格。' } },
+        { type: 'assistant/message', data: { message: { content: '收到，已经记下冷启动旧会话。' } } },
+      ],
+    },
+  }
+  const llmResult = JSON.stringify([{
+    kind: 'decision',
+    topic: 'cold-bind',
+    title: '冷会话绑定',
+    summary: '未激活到内存的旧普通会话支持一次绑定并自动提炼',
+    detail: '记住冷启动的旧普通会话也要能绑定人格。',
+    evidence: '记住冷启动的旧普通会话也要能绑定人格。',
+  }])
+  const { callRoute } = createHarness(t, { sessions, agents, observations, llmResult })
+  const pA = (await callRoute('POST', '/persona', { id: '', name: 'A', instructions: '' })).json.id
+
+  const state = (await callRoute('GET', '/state?session=cold')).json
+  assert.equal(state.bindOnce, true)
+  assert.equal(state.editable, false)
+
+  await callRoute('POST', '/bind', { session: 'cold', persona: pA })
+  await new Promise(resolve => setTimeout(resolve, 40))
+
+  const list = (await callRoute('GET', `/index?persona=${pA}&q=cold-bind`)).json
+  assert.equal(list.length, 1)
+})
