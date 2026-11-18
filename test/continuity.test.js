@@ -46,7 +46,8 @@ test('parallel personas keep their own bindings, summary and index after reopen'
     assert.equal(store.savePersona(a, 'Soryu'), a)
     assert.equal(store.personas().find(persona => persona.id === a).instructions, '新版设定')
     assert.equal(store.personaFor('a2').name, 'Soryu')
-    const opening = store.recall(store.personaFor('a2').id, 'other workspace', 'ALPHA-1', 'a2')
+    assert.deepEqual(store.recall(store.personaFor('a2').id, 'other workspace', 'ALPHA-1', 'a2'), [])
+    const opening = store.recall(store.personaFor('a2').id, 'demo', 'ALPHA-1', 'a2')
     assert.match(opening[0].summary, /ALPHA-1/)
     assert.equal(store.recall(a, 'demo', '项目 ALPHA-1 目前的进度是什么？', 'a2')[0].id, opening[0].id)
     assert.match(opening[0].detail, /第 29 行/)
@@ -225,6 +226,37 @@ test('migrates v3 database to v4, drops candidates, and prioritizes turn jobs ov
     const second = store.nextJob()
     assert.equal(second.source, 'import')
     assert.equal(second.turn, -1)
+  } finally {
+    store.close()
+  }
+})
+
+test('recall applies soft penalty for missing digits and isolates workspace-scoped memories', () => {
+  const store = new Store(':memory:')
+  try {
+    const p = store.savePersona('', '导师', '')
+    store.bind('sA', p)
+    store.bind('sB', p)
+    store.saveExtractedMemories({
+      persona: p, session: 'sA', turn: 1, workspace: 'wsA', created: 100,
+      items: [
+        { kind: 'progress', topic: 'upgrade-steps', title: '升级步骤', summary: '升级步骤说明', detail: '升级步骤怎么做：先执行备份与迁移' },
+        { kind: 'preference', topic: 'lang', title: '语言偏好', summary: '偏好中文回复', detail: '用户偏好中文交流' },
+      ],
+    })
+
+    // 查询含数字“3”，记忆不含“3”但 token 重叠高 → 软惩罚后仍可召回
+    const stepHits = store.recall(p, 'wsA', '升级步骤说明第3步', 'sA')
+    assert.equal(stepHits.length, 1)
+    assert.equal(stepHits[0].title, '升级步骤')
+
+    // 工作区隔离：wsA 的 progress 不出现在 wsB 的 recall 和“继续上次”里；preference 两边都能召回
+    assert.deepEqual(store.recall(p, 'wsB', '升级步骤', 'sB'), [])
+    assert.deepEqual(store.recall(p, 'wsB', '继续上次', 'sB').map(r => r.title), ['语言偏好'])
+    assert.equal(store.recall(p, 'wsB', '偏好中文', 'sB').length, 1)
+
+    // 不限工作区的 search（设置页 api.list）两边都能看到全部
+    assert.equal(store.search(p, '', '').length, 2)
   } finally {
     store.close()
   }

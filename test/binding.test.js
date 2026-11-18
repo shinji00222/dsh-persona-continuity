@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { apply } from '../index.js'
+import { Store } from '../lib/store.js'
 
 function createHarness(t, { sessions, agents, observations = {}, llmResult = '[]' } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-binding-test-'))
@@ -264,6 +265,53 @@ test('importHistory deduplicates chunks and handles observeSession errors per se
   assert.equal(memories.length, 1)
   assert.equal(memories[0].turn, -1)
   assert.equal(memories[0].source, 'import')
+})
+
+test('systemPrompt.context reads cached recall per turn instead of querying Store.recall repeatedly', async t => {
+  const sChat = makeSession('chat', [])
+  let contextProvider
+  const agent = {
+    ...makeAgent('chat', sChat),
+    ctx: {
+      systemPrompt: {
+        section: () => () => {},
+        context: opts => {
+          contextProvider = opts.text
+          return () => {}
+        },
+      },
+    },
+  }
+  const sessions = new Map([['chat', sChat]])
+  const agents = new Map([['chat', agent]])
+
+  let recallCount = 0
+  const originalRecall = Store.prototype.recall
+  Store.prototype.recall = function (...args) {
+    recallCount++
+    return originalRecall.apply(this, args)
+  }
+  t.after(() => { Store.prototype.recall = originalRecall })
+
+  const { callRoute, emit } = createHarness(t, { sessions, agents })
+  const pA = (await callRoute('POST', '/persona', { id: '', name: 'A', instructions: '' })).json.id
+  await callRoute('POST', '/bind', { session: 'chat', persona: pA })
+
+  assert.equal(contextProvider(), '')
+  assert.equal(recallCount, 0)
+
+  await emit('session/event', sChat, { type: 'turn/start', data: { turn: 1 } })
+  await emit('agent/pre-step', {
+    agent,
+    messages: [{ source: { kind: 'user' }, content: '普通问题' }],
+    signal: new AbortController().signal,
+  }, () => ({ ok: true }))
+
+  assert.equal(recallCount, 1)
+  contextProvider()
+  contextProvider()
+  contextProvider()
+  assert.equal(recallCount, 1)
 })
 
 test('history lookup turn allows non-history tools, denies native history tools, and still enqueues extraction', async t => {
