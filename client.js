@@ -9,6 +9,7 @@ window.__ModuleLoader__.load({
     const changedEvent = 'persona-continuity:changed'
     const normalOption = '__normal__'
     const createOption = '__create__'
+    const importCurrentOption = '__import_current__'
     const simulationPanel = 'persona-continuity-simulation'
 
     async function call(path, data) {
@@ -31,9 +32,13 @@ window.__ModuleLoader__.load({
         close: '关闭', cancel: '取消', createAndUse: '创建并使用', namePlaceholder: '输入人格名称',
         rename: '重命名', renamePersona: '重命名人格',
         save: '保存人格', index: '记忆索引', search: '查找记忆', forget: '删除记忆', confirm: '删除这条长期记忆？',
-        empty: '暂无匹配记忆', source: '来源会话', turn: '轮次', locked: '已开始的会话沿用原人格',
+        empty: '暂无匹配记忆', source: '来源会话', turn: '轮次', locked: '回复生成期间暂不可切换人格',
         edit: '编辑', saveMemory: '保存记忆',
         memoryTitle: '标题', summary: '摘要', detail: '详情', loading: '加载中…',
+        importCurrent: '提炼本对话记忆', importHistory: '从旧对话导入记忆',
+        importHistoryTitle: '选择旧对话加入记忆', importAction: '绑定并提炼记忆',
+        importing: '提炼中…', filterChats: '筛选旧对话标题', noChats: '暂无可导入的旧对话',
+        unbound: '未绑定',
       },
       en: {
         title: 'Persona Continuity', normal: 'Standard chat', persona: 'Persona', new: 'New persona', name: 'Name',
@@ -41,9 +46,13 @@ window.__ModuleLoader__.load({
         rename: 'Rename', renamePersona: 'Rename persona',
         instructions: 'Persona instructions', save: 'Save persona', index: 'Memory index', search: 'Search memories',
         forget: 'Forget', confirm: 'Delete this long-term memory?', empty: 'No matching memories', source: 'Source chat',
-        turn: 'Turn', locked: 'The persona is fixed after the chat starts',
+        turn: 'Turn', locked: 'Persona cannot be switched while generating',
         edit: 'Edit', saveMemory: 'Save memory',
         memoryTitle: 'Title', summary: 'Summary', detail: 'Details', loading: 'Loading…',
+        importCurrent: 'Extract memories from chat', importHistory: 'Import from past chats',
+        importHistoryTitle: 'Import memories from past chats', importAction: 'Bind & extract',
+        importing: 'Extracting…', filterChats: 'Filter past chats', noChats: 'No past chats found',
+        unbound: 'Unbound',
       },
     }
 
@@ -62,6 +71,7 @@ window.__ModuleLoader__.load({
       const [state, setState] = useState(null)
       const [pending, setPending] = useState(false)
       const [error, setError] = useState('')
+      const [notice, setNotice] = useState('')
       const [mode, setMode] = useState(null)
       const [name, setName] = useState('')
       const [renameId, setRenameId] = useState('')
@@ -92,8 +102,29 @@ window.__ModuleLoader__.load({
         if (id === state.selected) return
         setPending(true)
         setError('')
+        setNotice('')
         try {
           setState(await call('/bind', { session: sessionId, persona: id }))
+          window.dispatchEvent(new Event(changedEvent))
+        } catch (failure) {
+          setError(failure.message)
+        } finally {
+          setPending(false)
+        }
+      }
+
+      async function extractCurrent() {
+        setMode(null)
+        if (!state.selected || pending) return
+        setPending(true)
+        setError('')
+        setNotice('')
+        try {
+          const result = await call('/history/import', {
+            persona: state.selected, sessions: [sessionId], activeSession: sessionId,
+          })
+          setNotice('已提炼 ' + result.extractedMemories + ' 条记忆')
+          window.dispatchEvent(new Event(changedEvent))
         } catch (failure) {
           setError(failure.message)
         } finally {
@@ -166,18 +197,24 @@ window.__ModuleLoader__.load({
           items: [
             { id: normalOption, label: t('normal') },
             { id: createOption, label: t('new'), icon: h(IconPlusOutlineRegular, { size: 16, 'aria-hidden': true }) },
+            ...(state.selected && state.hasHistory ? [{ id: importCurrentOption, label: t('importCurrent') }] : []),
             ...state.personas.map(persona => ({
               id: persona.id, label: h('span', { 'data-persona-id': persona.id }, persona.name),
             })),
           ],
           selectedId: state.selected || normalOption,
           onSelect: id => {
+            if (id === importCurrentOption) {
+              void extractCurrent()
+              return
+            }
             if (id !== createOption) {
               void select(id === normalOption ? '' : id)
               return
             }
             setName('')
             setError('')
+            setNotice('')
             setMode('create')
           },
           align: 'start', portal: true,
@@ -204,6 +241,7 @@ window.__ModuleLoader__.load({
           onSelect: () => setMode('rename'),
         }),
         mode !== 'create' && !renaming && errorMessage(error),
+        mode !== 'create' && !renaming && notice && h('span', { style: { fontSize: 12, opacity: 0.8, marginLeft: 6 } }, notice),
         h(Modal, {
           title: t(renaming ? 'renamePersona' : 'new'), closeLabel: t('close'),
           open: mode === 'create' || renaming, onClose: closeName,
@@ -283,11 +321,93 @@ window.__ModuleLoader__.load({
       )
     }
 
+    function HistoryImportModal({ id, t, open, onClose, onImported }) {
+      const [sessions, setSessions] = useState(null)
+      const [selected, setSelected] = useState([])
+      const [filter, setFilter] = useState('')
+      const [busy, setBusy] = useState(false)
+      const [error, setError] = useState('')
+
+      useEffect(() => {
+        if (!open) return
+        let live = true
+        setSessions(null)
+        setSelected([])
+        setFilter('')
+        setError('')
+        call('/history/sessions').then(
+          value => { if (live) setSessions(value) },
+          failure => { if (live) setError(failure.message) },
+        )
+        return () => { live = false }
+      }, [open, id])
+
+      function toggle(sessionId) {
+        setSelected(current => current.includes(sessionId)
+          ? current.filter(item => item !== sessionId)
+          : [...current, sessionId])
+      }
+
+      async function submitImport() {
+        if (!selected.length || busy) return
+        setBusy(true)
+        setError('')
+        try {
+          const result = await call('/history/import', { persona: id, sessions: selected })
+          window.dispatchEvent(new Event(changedEvent))
+          onImported(result)
+          onClose()
+        } catch (failure) {
+          setError(failure.message)
+        } finally {
+          setBusy(false)
+        }
+      }
+
+      const needle = filter.trim().toLowerCase()
+      const visible = (sessions ?? []).filter(item =>
+        !needle || item.title.toLowerCase().includes(needle) || item.personaName.toLowerCase().includes(needle))
+
+      return h(Modal, {
+        title: t('importHistoryTitle'), closeLabel: t('close'), open,
+        onClose: () => { if (!busy) onClose() },
+        footer: h(React.Fragment, null,
+          h(Button, { variant: 'outline', disabled: busy, onClick: onClose }, t('cancel')),
+          h(Button, { variant: 'primary', disabled: busy || !selected.length, onClick: submitImport },
+            busy ? t('importing') : t('importAction') + (selected.length ? ' (' + selected.length + ')' : ''))),
+      }, h('div', { style: { display: 'grid', gap: 10 } },
+        h(Input, {
+          type: 'search', placeholder: t('filterChats'), value: filter, maxLength: 100, disabled: busy,
+          onChange: event => setFilter(event.target.value),
+        }),
+        sessions === null ? h('p', null, t('loading'))
+          : !visible.length ? h('p', null, t('noChats'))
+          : h('div', { style: { display: 'grid', gap: 6, maxHeight: 320, overflowY: 'auto' } },
+            visible.map(item => h('label', {
+              key: item.id,
+              style: { display: 'flex', alignItems: 'flex-start', gap: 8, padding: '6px 4px', cursor: 'pointer' },
+            },
+            h('input', {
+              type: 'checkbox', checked: selected.includes(item.id), disabled: busy,
+              onChange: () => toggle(item.id),
+            }),
+            h('span', { style: { display: 'grid', gap: 2, minWidth: 0 } },
+              h('strong', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, item.title),
+              h('span', { style: { fontSize: 12, opacity: 0.75 } },
+                new Date(item.createdAt).toLocaleString() + ' · ' +
+                (item.personaId ? (item.personaId === id ? '当前人格' : '已绑定：' + item.personaName) : t('unbound'))),
+            )))),
+        errorMessage(error),
+      ))
+    }
+
     function MemoryPanel({ id, t }) {
       const [query, setQuery] = useState('')
       const [rows, setRows] = useState(null)
       const [revision, setRevision] = useState(0)
       const [error, setError] = useState('')
+      const [importOpen, setImportOpen] = useState(false)
+      const [notice, setNotice] = useState('')
       const persona = '?persona=' + encodeURIComponent(id)
 
       useEffect(() => {
@@ -306,7 +426,10 @@ window.__ModuleLoader__.load({
       }
 
       return h('div', { style: panelStyle },
-        h('h3', null, t('index')),
+        h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' } },
+          h('h3', { style: { margin: 0 } }, t('index')),
+          h(Button, { type: 'button', size: 'sm', variant: 'outline', onClick: () => setImportOpen(true) }, t('importHistory'))),
+        notice && h('p', { style: { margin: 0, fontSize: 13 } }, notice),
         h(Input, {
           type: 'search', 'aria-label': t('search'), placeholder: t('search'), value: query, maxLength: 300,
           onChange: event => { setRows(null); setQuery(event.target.value) },
@@ -315,6 +438,13 @@ window.__ModuleLoader__.load({
           ? rows.map(row => h(MemoryCard, { key: row.id, row, t, mutate }))
           : h('p', null, t('empty')),
         errorMessage(error),
+        h(HistoryImportModal, {
+          id, t, open: importOpen, onClose: () => setImportOpen(false),
+          onImported: result => {
+            setNotice('已绑定 ' + (result.importedSessions + result.skippedSessions) + ' 段对话，提炼写入 ' + result.extractedMemories + ' 条记忆')
+            setRevision(current => current + 1)
+          },
+        }),
       )
     }
 

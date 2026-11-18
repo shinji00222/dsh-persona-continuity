@@ -4,7 +4,7 @@ import { Store } from './lib/store.js'
 import { extract, rememberableInput, textBlocks } from './lib/extract.js'
 import { registerWeb } from './lib/web.js'
 import { createSimulation } from './lib/simulation.js'
-import { historyRequest, retrieveHistory } from './lib/history.js'
+import { historyRequest, listSessionsForImport, readConversationChunks, retrieveHistory } from './lib/history.js'
 
 export const name = 'persona-continuity'
 export const inject = ['agents', 'sessions', 'systemPrompt', 'llm', 'connection', 'sessionQuery']
@@ -19,9 +19,12 @@ function supported(session) {
 
 function canBind(session, agent) {
   if (!supported(session) || session.requestHeader?.()) return false
-  if (agent?.inbox?.nextTurn?.length || agent?.inbox?.nextStep?.length) return false
-  return !session.snapshotEvents().some(event =>
-    event.type === 'turn/start' || event.type === 'user/message' || event.type === 'assistant/message')
+  return !(agent?.inbox?.nextTurn?.length || agent?.inbox?.nextStep?.length)
+}
+
+function hasHistory(session) {
+  return Boolean(session?.snapshotEvents?.().some(event =>
+    event.type === 'user/message' || event.type === 'assistant/message'))
 }
 
 export function apply(ctx) {
@@ -32,6 +35,29 @@ export function apply(ctx) {
   const lifetime = new AbortController()
   const simulation = createSimulation(store, ctx.llm, lifetime.signal)
   let draining = false
+  let lastModel = null
+
+  function modelForSession(id) {
+    if (!id) return null
+    const session = ctx.sessions.get(id)
+    const agent = ctx.agents.get(id)
+    const target = session?.requestHeader?.()?.config ?? agent?.options
+    if (target?.provider && target?.model) {
+      lastModel = { provider: target.provider, model: target.model }
+      return lastModel
+    }
+    return null
+  }
+
+  function resolveModel(preferredSessionId) {
+    const direct = modelForSession(preferredSessionId)
+    if (direct) return direct
+    for (const agent of ctx.agents.list()) {
+      const candidate = modelForSession(String(agent.id))
+      if (candidate) return candidate
+    }
+    return lastModel
+  }
 
   const detach = id => {
     attached.get(id)?.()
@@ -102,9 +128,11 @@ export function apply(ctx) {
     }).finally(() => { draining = false })
   }
 
-  function requireDraft(id) {
+  function requireIdle(id) {
     const agent = ctx.agents.get(id)
-    if (!canBind(ctx.sessions.get(id), agent)) throw new Error('请在新会话发出首条消息前选择人格')
+    if (turns.has(id) || !canBind(ctx.sessions.get(id), agent)) {
+      throw new Error('请等待当前回复完成后再切换人格')
+    }
     return agent
   }
 
@@ -114,18 +142,19 @@ export function apply(ctx) {
       return {
         personas: store.personas(),
         selected: id ? store.personaFor(id)?.id ?? '' : '',
-        editable: Boolean(canBind(session, id ? ctx.agents.get(id) : undefined)),
+        editable: Boolean(id && !turns.has(id) && canBind(session, ctx.agents.get(id))),
+        hasHistory: Boolean(session && hasHistory(session)),
       }
     },
     bind(id, persona) {
-      const agent = requireDraft(id)
+      const agent = requireIdle(id)
       store.bind(id, persona)
       if (agent && persona) attach(agent)
       if (!persona) detach(id)
       return api.state(id)
     },
     create(session, name) {
-      const agent = requireDraft(session)
+      const agent = requireIdle(session)
       store.transaction(() => {
         const persona = store.savePersona('', name, '')
         store.bind(session, persona)
@@ -137,6 +166,47 @@ export function apply(ctx) {
     list: (persona, query) => store.search(persona, '', query),
     edit: (persona, id, value) => store.edit(persona, id, value),
     forget: (persona, id) => store.forget(persona, id),
+    async historySessions() {
+      const signal = AbortSignal.any([lifetime.signal, AbortSignal.timeout(8000)])
+      return listSessionsForImport(ctx.sessionQuery, store.bindingsMap(), signal)
+    },
+    async importHistory({ persona, sessions, activeSession } = {}) {
+      if (typeof persona !== 'string' || !store.personas().some(item => item.id === persona)) {
+        throw new Error('人格不存在')
+      }
+      const ids = [...new Set(Array.isArray(sessions) ? sessions.filter(item => typeof item === 'string' && item) : [])].slice(0, 20)
+      if (!ids.length) throw new Error('请选择至少一段旧对话')
+      const target = resolveModel(typeof activeSession === 'string' ? activeSession : '')
+      if (!target) throw new Error('请先打开一个已选好模型的对话，再提炼记忆')
+
+      let importedSessions = 0
+      let skippedSessions = 0
+      let extractedMemories = 0
+      for (const sessionId of ids) {
+        const readSignal = AbortSignal.any([lifetime.signal, AbortSignal.timeout(10000)])
+        const { workspace, chunks } = await readConversationChunks(ctx.sessionQuery, sessionId, readSignal)
+        store.bind(sessionId, persona)
+        const agent = ctx.agents.get(sessionId)
+        if (agent) attach(agent)
+        if (!chunks.length) {
+          skippedSessions++
+          continue
+        }
+        for (const chunk of chunks) {
+          const signal = AbortSignal.any([lifetime.signal, AbortSignal.timeout(45000)])
+          const known = store.topics(persona, workspace)
+          const items = await extract(ctx.llm, {
+            session: sessionId, persona, workspace, provider: target.provider, model: target.model,
+            input: JSON.stringify({ user: chunk.user, assistant: chunk.assistant }),
+          }, known, signal)
+          extractedMemories += store.transaction(() => store.saveExtractedMemories({
+            persona, session: sessionId, turn: chunk.turn, workspace, created: Date.now(), items,
+          }))
+        }
+        importedSessions++
+      }
+      return { importedSessions, skippedSessions, extractedMemories }
+    },
   }
 
   ctx.effect(() => {
@@ -153,7 +223,7 @@ export function apply(ctx) {
   })
   ctx.effect(() => registerWeb(ctx.connection, api, simulation))
 
-  ctx.on('agent/created', ({ agent }) => { attach(agent) })
+  ctx.on('agent/created', ({ agent }) => { modelForSession(String(agent.id)); attach(agent) })
   ctx.on('agent/disposed', ({ agent }) => {
     const id = String(agent.id)
     detach(id)
@@ -200,6 +270,7 @@ export function apply(ctx) {
     if (!supported(session)) return
     const id = String(session.id)
     if (event.type === 'turn/start') {
+      modelForSession(id)
       const persona = store.personaFor(id)
       if (persona) turns.set(id, { persona: persona.id, user: '', assistant: '' })
       return
