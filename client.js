@@ -639,35 +639,49 @@ window.__ModuleLoader__.load({
             : h('p', null, '导入或选择批次后，这里会显示学生名单。')))
     }
 
-    function SurveyEditors({ roles, setRoles, questions, setQuestions, onManageRoles }) {
+    const surveyEditorPageSize = 5
+
+    function SurveyEditorColumn({ title, headerAction, items, renderItem, addLabel, onAdd, addDisabled }) {
       const [page, setPage] = useState(0)
-      const first = Math.min(page, Math.max(0, Math.ceil(roles.length / 10) - 1)) * 10
+      const current = Math.min(page, Math.max(0, Math.ceil(items.length / surveyEditorPageSize) - 1))
+      const first = current * surveyEditorPageSize
+      const end = Math.min(first + surveyEditorPageSize, items.length)
+      return h('section', { 'aria-label': title, style: { ...surveyCard, gridTemplateRows: 'auto 1fr auto' } },
+        h('header', { style: { ...actionsStyle, alignItems: 'center', justifyContent: 'space-between' } },
+          h('h2', null, title), headerAction),
+        h('div', { style: { display: 'grid', gap: 14, alignContent: 'start', minWidth: 0 } },
+          items.slice(first, end).map((item, offset) => renderItem(item, first + offset))),
+        h('footer', {
+          style: { ...actionsStyle, justifyContent: 'space-between', alignItems: 'center' },
+        },
+        h('div', { style: { ...actionsStyle, alignItems: 'center' }, 'aria-label': title + '分页' },
+          action('上一页', () => setPage(current - 1), current === 0),
+          h('span', { 'aria-live': 'polite' }, (items.length ? first + 1 : 0) + '–' + end + ' / ' + items.length),
+          action('下一页', () => setPage(current + 1), end >= items.length)),
+        action(addLabel, () => {
+          setPage(Math.floor(items.length / surveyEditorPageSize))
+          onAdd()
+        }, addDisabled)))
+    }
+
+    function SurveyEditors({ roles, setRoles, questions, setQuestions, onManageRoles, onImport, busy }) {
       const remove = (setter, index) => setter(items => items.filter((_, position) => position !== index))
-      return h('div', { style: surveyColumns },
-        h('section', { style: surveyCard },
-          h('div', { style: { ...actionsStyle, alignItems: 'center', justifyContent: 'space-between' } },
-            h('h2', null, '受访角色'),
-            action('批量管理', onManageRoles)),
-          roles.slice(first, first + 10).map((role, slot) => {
-            const index = first + slot
-            return h('fieldset', { key: role.id, style: surveyCard },
+      return h('div', { style: { ...surveyColumns, alignItems: 'stretch' } },
+        h(SurveyEditorColumn, {
+          title: '受访角色', headerAction: action('批量管理', onManageRoles), items: roles,
+          renderItem: (role, index) => h('fieldset', { key: role.id, style: surveyCard },
             h('legend', null, '角色 ' + (index + 1)),
             field('角色名称', surveyInput(role.name, name => updateItem(setRoles, index, { name }), { maxLength: 64 })),
             field('分组', surveyInput(role.group, group => updateItem(setRoles, index, { group }), { maxLength: 64 })),
             field('角色背景', surveyText(role.background, background => updateItem(setRoles, index, { background }), 2, 1800)),
-            action('移除角色', () => remove(setRoles, index), roles.length === 1))
-          }),
-          roles.length > 10 && h('div', { style: actionsStyle },
-            action('上一页', () => setPage(first / 10 - 1), first === 0),
-            h('span', null, (first + 1) + '–' + Math.min(first + 10, roles.length) + ' / ' + roles.length),
-            action('下一页', () => setPage(first / 10 + 1), first + 10 >= roles.length)),
-          action('添加角色', () => {
-            setPage(Math.floor(roles.length / 10))
-            setRoles(items => [...items, { id: crypto.randomUUID(), name: '', group: '', background: '' }])
-          })),
-        h('section', { style: surveyCard },
-          h('h2', null, '问卷题目'),
-          questions.map((question, index) => h('fieldset', { key: question.id, style: surveyCard },
+            action('移除角色', () => remove(setRoles, index), roles.length === 1)),
+          addLabel: '添加角色', onAdd: () => setRoles(items => [
+            ...items, { id: crypto.randomUUID(), name: '', group: '', background: '' },
+          ]),
+        }),
+        h(SurveyEditorColumn, {
+          title: '问卷题目', headerAction: action('导入问卷', onImport, busy), items: questions,
+          renderItem: (question, index) => h('fieldset', { key: question.id, style: surveyCard },
             h('legend', null, '第 ' + (index + 1) + ' 题'),
             field('题干', surveyInput(question.text, text => updateItem(setQuestions, index, { text }), { required: true, maxLength: 800 })),
             field('题型', h('select', {
@@ -683,10 +697,12 @@ window.__ModuleLoader__.load({
                   options: question.options.filter((_, slot) => slot !== position),
                 })))),
               action('添加选项', () => updateItem(setQuestions, index, { options: [...question.options, ''] }), question.options.length === 12)),
-            action('移除题目', () => remove(setQuestions, index), questions.length === 1))),
-          action('添加题目', () => setQuestions(items => [...items, {
+            action('移除题目', () => remove(setQuestions, index), questions.length === 1)),
+          addLabel: '添加题目', addDisabled: questions.length === 12,
+          onAdd: () => setQuestions(items => [...items, {
             id: crypto.randomUUID(), text: '', options: ['', ''],
-          }]), questions.length === 12)))
+          }]),
+        }))
     }
 
     function CalibrationForm({ result, runId, cohort, saved, onSaved }) {
@@ -975,7 +991,6 @@ window.__ModuleLoader__.load({
                     }, h('span', { style: { ...labelStyle, maxWidth: '14em' } }, questionnaireLabel),
                     h(IconChevronDownOutlineRegular, { size: 14, 'aria-hidden': true })),
                   })),
-                action('导入问卷', showQuestionnaireImport, busy),
                 action(questionnaireId ? '保存修改' : '保存问卷', () => saveQuestionnaire(questionnaireId), busy),
                 questionnaireId && action('另存为新问卷', () => saveQuestionnaire(''), busy),
                 questionnaireId && action('删除问卷', () => {
@@ -999,7 +1014,10 @@ window.__ModuleLoader__.load({
               h('div', { style: actionsStyle },
                 h(Button, { type: 'submit', variant: 'primary', disabled: busy || !models?.[model] }, busy ? '处理中…' : '运行问卷'),
                 h('span', null, roles.length + ' 个角色 · ' + questions.length + ' 道题'))),
-            h(SurveyEditors, { roles, setRoles, questions, setQuestions, onManageRoles: () => setTab('students') })),
+            h(SurveyEditors, {
+              roles, setRoles, questions, setQuestions, busy,
+              onManageRoles: () => setTab('students'), onImport: showQuestionnaireImport,
+            })),
           (tab === 'results' || tab === 'calibration') && (runs.length ? h('div', { style: actionsStyle },
             field('运行记录', h('select', { value: id, style: { ...selectStyle, maxWidth: '100%' }, disabled: busy, onChange: chooseRun },
               runs.map(run => h('option', { key: run.id, value: run.id },

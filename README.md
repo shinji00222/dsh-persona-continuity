@@ -9,7 +9,7 @@
 
 ## 本地试用
 
-打包运行 `npm pack`。将生成的 `dsh-persona-continuity-0.2.0-preview.10.tgz` 装入测试 profile，再启动该 profile。已在 DSH 0.2.2-rc.3 宿主验证。
+打包运行 `npm pack`。将生成的 `dsh-persona-continuity-0.2.0-preview.11.tgz` 装入测试 profile，再启动该 profile。已在 DSH 0.2.2-rc.3 宿主验证。
 
 - SQLite 文件位于 `$DSH_HOME/persona-continuity/memory.sqlite`。提炼时会将该轮的有限正文发送给当前会话的模型，召回时会把选中的记忆内容提供给模型。
 - 最新提炼可能需要几十秒。被取消和未完整结束的轮次跳过提炼。已开始的会话沿用绑定的人格设定版本。
@@ -29,6 +29,6 @@
 
 在「模拟结果」选择运行记录，展开角色查看逐题答案，或点「导出答卷 CSV」下载整次模拟答卷。
 
-点「问卷设计 → 导入问卷」。Markdown 可用 `#` 写问卷名称、`## 公共材料` 写背景、标题或编号写题目、列表写单选选项。导入窗口内有格式示例。JSON 需要 `title` 和 `questions`，可填写 `material`。每题提供 `text`，单选题再提供 `options` 字符串数组。`id` 省略时自动分配。TSV 使用「题干、题型、选项」三列表头，单选题的选项用 `|` 分隔。
+点「问卷题目」标题旁的「导入问卷」。Markdown 可用 `#` 写问卷名称、`## 公共材料` 写背景、标题或编号写题目、列表写单选选项。导入窗口内有格式示例。JSON 需要 `title` 和 `questions`，可填写 `material`。每题提供 `text`，单选题再提供 `options` 字符串数组。`id` 省略时自动分配。TSV 使用「题干、题型、选项」三列表头，单选题的选项用 `|` 分隔。
 
 运行设置里的「并行作答数」默认是 6，可在 1–12 之间调整。
