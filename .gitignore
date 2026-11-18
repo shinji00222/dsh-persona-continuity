@@ -3,3 +3,5 @@
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+# 本地角色/受访者数据，不进入仓库
+/docs/simulation-library/

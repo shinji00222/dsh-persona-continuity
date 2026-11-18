@@ -6,7 +6,8 @@
   "engines": {
     "node": ">=22.13"
   },
-  "description": "Independent cross-session memory for each DeepSeek Harness persona.",
+  "description": "Per-persona cross-session memory and survey simulation for DeepSeek Harness.",
+  "license": "MIT",
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
@@ -17,9 +18,14 @@
     "client.js",
     "lib",
     "locale",
-    "docs",
+    "docs/research.md",
+    "docs/project-plan.md",
+    "docs/simulation-plan.md",
+    "docs/simulation-research.md",
+    "docs/development-log.md",
     "cordis.patch.yml",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "check": "node --check index.js && node --check client.js && node --check lib/store.js && node --check lib/extract.js && node --check lib/web.js && node --check lib/simulation.js && node --check lib/history.js",

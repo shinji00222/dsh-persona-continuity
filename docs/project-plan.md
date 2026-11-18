@@ -1,6 +1,6 @@
 # DSH 人格续忆项目规划
 
-项目包名 `dsh-persona-continuity`，当前预览版 0.2.0-preview.2。来源和方案核对见 [调研](research.md)。
+项目包名 `dsh-persona-continuity`，当前预览版 0.2.0-preview.13。来源和方案核对见 [调研](research.md)，模拟任务的方案见 [模拟任务规划](simulation-plan.md)。
 
 ## 首版体验
 
