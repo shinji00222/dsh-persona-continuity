@@ -151,3 +151,30 @@ test('bindingsMap and saveExtractedMemories record initial binding and imported 
     store.close()
   }
 })
+
+test('refreshBinding updates bound session instructions and revision only when instructions change', () => {
+  const store = new Store(':memory:')
+  try {
+    const id = store.savePersona('', '导师', '旧设定')
+    store.bind('s1', id)
+    assert.equal(store.personaFor('s1').instructions, '旧设定')
+    assert.equal(store.personaFor('s1').revision, 1)
+
+    // 只改名不改设定：revision 不变
+    store.savePersona(id, '新名字')
+    store.refreshBinding('s1')
+    assert.equal(store.personaFor('s1').name, '新名字')
+    assert.equal(store.personaFor('s1').revision, 1)
+
+    // 修改设定：personaFor 仍为旧快照，refreshBinding 后变成新设定且 revision + 1
+    store.savePersona(id, '新名字', '新设定')
+    assert.equal(store.personaFor('s1').instructions, '旧设定')
+    assert.equal(store.personaFor('s1').revision, 1)
+
+    store.refreshBinding('s1')
+    assert.equal(store.personaFor('s1').instructions, '新设定')
+    assert.equal(store.personaFor('s1').revision, 2)
+  } finally {
+    store.close()
+  }
+})

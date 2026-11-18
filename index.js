@@ -301,6 +301,7 @@ export function apply(ctx) {
     const id = String(session.id)
     if (event.type === 'turn/start') {
       modelForSession(id)
+      store.refreshBinding(id)
       const persona = store.personaFor(id)
       if (persona) turns.set(id, { persona: persona.id, user: '', assistant: '' })
       return

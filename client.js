@@ -43,6 +43,7 @@ window.__ModuleLoader__.load({
         importHistoryTitle: '选择旧对话加入记忆', importAction: '绑定并提炼记忆',
         importing: '提炼中…', filterChats: '筛选旧对话标题', noChats: '暂无可导入的旧对话',
         unbound: '未绑定',
+        instructionsHint: '修改后，已绑定的会话从下一轮起生效',
       },
       en: {
         title: 'Persona Continuity', normal: 'Standard chat', persona: 'Persona', new: 'New persona', name: 'Name',
@@ -61,6 +62,7 @@ window.__ModuleLoader__.load({
         importHistoryTitle: 'Import memories from past chats', importAction: 'Bind & extract',
         importing: 'Extracting…', filterChats: 'Filter past chats', noChats: 'No past chats found',
         unbound: 'Unbound',
+        instructionsHint: 'Changes take effect on the next turn for bound chats',
       },
     }
 
@@ -554,7 +556,7 @@ window.__ModuleLoader__.load({
           h('label', null, t('instructions'), h('textarea', {
             value: instructions, rows: 4, maxLength: 3500,
             style: textareaStyle, onChange: e => setInstructions(e.target.value),
-          })),
+          }), h('span', { style: { display: 'block', fontSize: 12, opacity: 0.75, marginTop: 4 } }, t('instructionsHint'))),
           h(Button, { variant: 'primary', type: 'submit', disabled: busy, style: { justifySelf: 'start' } }, t('save'))),
         errorMessage(error),
         id && h(MemoryPanel, { key: id, id, t }),
