@@ -711,16 +711,27 @@ window.__ModuleLoader__.load({
     }
 
     const surveyEditorPageSize = 5
+    const surveyEditorStyles = `
+      @container persona-survey-editors (min-width: 620px) {
+        .persona-survey-questions {
+          contain: size;
+        }
+        .persona-survey-questions > .persona-survey-editor-items {
+          overflow-y: auto;
+          scrollbar-gutter: stable;
+        }
+      }
+    `
 
-    function SurveyEditorColumn({ title, headerAction, items, renderItem, addLabel, onAdd, addDisabled }) {
+    function SurveyEditorColumn({ title, className, headerAction, items, renderItem, addLabel, onAdd, addDisabled }) {
       const [page, setPage] = useState(0)
       const current = Math.min(page, Math.max(0, Math.ceil(items.length / surveyEditorPageSize) - 1))
       const first = current * surveyEditorPageSize
       const end = Math.min(first + surveyEditorPageSize, items.length)
-      return h('section', { 'aria-label': title, style: { ...surveyCard, gridTemplateRows: 'auto 1fr auto' } },
+      return h('section', { 'aria-label': title, className, style: { ...surveyCard, gridTemplateRows: 'auto minmax(0, 1fr) auto' } },
         h('header', { style: { ...actionsStyle, alignItems: 'center', justifyContent: 'space-between' } },
           h('h2', null, title), headerAction),
-        h('div', { style: { display: 'grid', gap: 14, alignContent: 'start', minWidth: 0 } },
+        h('div', { className: 'persona-survey-editor-items', style: { display: 'grid', gap: 14, alignContent: 'start', minWidth: 0 } },
           items.slice(first, end).map((item, offset) => renderItem(item, first + offset))),
         h('footer', {
           style: { ...actionsStyle, justifyContent: 'space-between', alignItems: 'center' },
@@ -738,6 +749,7 @@ window.__ModuleLoader__.load({
     function SurveyEditors({ roles, setRoles, questions, setQuestions, onManageRoles, onImport, busy }) {
       const remove = (setter, index) => setter(items => items.filter((_, position) => position !== index))
       return h('div', { style: { ...surveyColumns, alignItems: 'stretch' } },
+        h('style', null, surveyEditorStyles),
         h(SurveyEditorColumn, {
           title: '受访角色', headerAction: action('批量管理', onManageRoles), items: roles,
           renderItem: (role, index) => h('fieldset', { key: role.id, style: surveyCard },
@@ -751,7 +763,7 @@ window.__ModuleLoader__.load({
           ]),
         }),
         h(SurveyEditorColumn, {
-          title: '问卷题目', headerAction: action('导入问卷', onImport, busy), items: questions,
+          title: '问卷题目', className: 'persona-survey-questions', headerAction: action('导入问卷', onImport, busy), items: questions,
           renderItem: (question, index) => h('fieldset', { key: question.id, style: surveyCard },
             h('legend', null, '第 ' + (index + 1) + ' 题'),
             field('题干', surveyInput(question.text, text => updateItem(setQuestions, index, { text }), { required: true, maxLength: 800 })),
@@ -1067,7 +1079,9 @@ window.__ModuleLoader__.load({
             setNotice('已载入 ' + students.length + ' 名学生')
             setTab('draft')
           } }),
-          tab === 'draft' && h('form', { onSubmit: start, style: { display: 'grid', gap: 18 } },
+          tab === 'draft' && h('form', {
+            onSubmit: start, style: { display: 'grid', gap: 18, container: 'persona-survey-editors / inline-size' },
+          },
             h('section', { style: surveyCard },
               h('h2', null, '基本设置'),
               h('div', { style: { ...actionsStyle, alignItems: 'end' } },
