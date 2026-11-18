@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { test } from 'node:test'
 import { Store, clean } from '../lib/store.js'
 import { extract } from '../lib/extract.js'
@@ -174,6 +175,56 @@ test('refreshBinding updates bound session instructions and revision only when i
     store.refreshBinding('s1')
     assert.equal(store.personaFor('s1').instructions, '新设定')
     assert.equal(store.personaFor('s1').revision, 2)
+  } finally {
+    store.close()
+  }
+})
+
+test('migrates v3 database to v4, drops candidates, and prioritizes turn jobs over import jobs', t => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-v3-to-v4-'))
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+  const path = join(dir, 'memory.sqlite')
+
+  const legacy = new DatabaseSync(path)
+  legacy.exec(`
+    CREATE TABLE personas (id TEXT PRIMARY KEY, name TEXT NOT NULL, instructions TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1);
+    CREATE TABLE bindings (session TEXT PRIMARY KEY, persona TEXT NOT NULL REFERENCES personas(id), instructions TEXT NOT NULL DEFAULT '', revision INTEGER NOT NULL DEFAULT 1);
+    CREATE TABLE memories (id TEXT PRIMARY KEY, persona TEXT NOT NULL REFERENCES personas(id),
+      topic TEXT NOT NULL, kind TEXT NOT NULL, title TEXT NOT NULL, summary TEXT NOT NULL, detail TEXT NOT NULL,
+      session TEXT NOT NULL, turn INTEGER NOT NULL, workspace TEXT NOT NULL, updated INTEGER NOT NULL, revision INTEGER NOT NULL DEFAULT 1,
+      UNIQUE(persona, kind, topic, workspace));
+    CREATE TABLE jobs (session TEXT NOT NULL, turn INTEGER NOT NULL, persona TEXT NOT NULL REFERENCES personas(id),
+      workspace TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, input TEXT NOT NULL,
+      attempt INTEGER NOT NULL DEFAULT 0, available INTEGER NOT NULL, created INTEGER NOT NULL DEFAULT 0, lease TEXT, PRIMARY KEY(session, turn));
+    CREATE TABLE candidates (id TEXT PRIMARY KEY);
+    INSERT INTO personas VALUES ('p1', '导师', '讲源码', 1);
+    INSERT INTO bindings VALUES ('s1', 'p1', '讲源码', 1);
+    INSERT INTO memories VALUES ('m1', 'p1', 't1', 'fact', '标题', '摘要', '详情', 's1', 1, 'demo', 100, 1);
+    PRAGMA user_version = 3;
+  `)
+  legacy.close()
+
+  const store = new Store(path)
+  try {
+    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 4)
+    assert.equal(store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='candidates'").get(), undefined)
+    assert.equal(store.personaFor('s1').name, '导师')
+    assert.equal(store.search('p1', 'demo', '标题').length, 1)
+
+    store.enqueue({
+      session: 's1', turn: -1, persona: 'p1', workspace: 'demo',
+      provider: 'mock', model: 'm1', input: '{}', source: 'import', chunk_hash: 'h1',
+    })
+    store.enqueue({
+      session: 's1', turn: 2, persona: 'p1', workspace: 'demo',
+      provider: 'mock', model: 'm1', input: '{}', source: 'turn',
+    })
+    const first = store.nextJob()
+    assert.equal(first.source, 'turn')
+    assert.equal(first.turn, 2)
+    const second = store.nextJob()
+    assert.equal(second.source, 'import')
+    assert.equal(second.turn, -1)
   } finally {
     store.close()
   }

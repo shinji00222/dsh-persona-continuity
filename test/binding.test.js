@@ -194,12 +194,76 @@ test('importHistory skips sessions bound to another persona or busy without rebi
     activeSession: 'active',
   })
   assert.equal(res.status, 200)
-  assert.equal(res.json.importedSessions, 0)
+  assert.equal(res.json.queuedChunks, 0)
   assert.deepEqual(res.json.skipped, [
     { id: 'other', reason: 'bound-to-other' },
     { id: 'busy-chat', reason: 'busy' },
   ])
   assert.equal((await callRoute('GET', '/state?session=other')).json.selected, pB)
+})
+
+test('importHistory deduplicates chunks and handles observeSession errors per session', async t => {
+  const sActive = makeSession('active', [])
+  const sOther = makeSession('other', [])
+  const sessions = new Map([['active', sActive], ['other', sOther]])
+  const agents = new Map([['active', makeAgent('active', sActive)], ['other', makeAgent('other', sOther)]])
+  const observations = {
+    good: {
+      header: { id: 'good', cwd: 'ws' },
+      events: [
+        { type: 'user/message', data: { source: { kind: 'user' }, content: '记住我们用 SQLite 存储' } },
+        { type: 'assistant/message', data: { message: { content: '好的，已经确认使用 SQLite。' } } },
+      ],
+    },
+    other: {
+      header: { id: 'other', cwd: 'ws' },
+      events: [
+        { type: 'user/message', data: { source: { kind: 'user' }, content: '这是另一个人格的对话内容' } },
+        { type: 'assistant/message', data: { message: { content: '收到。' } } },
+      ],
+    },
+  }
+  const llmResult = JSON.stringify([{
+    kind: 'decision', topic: 'sqlite', title: '存储方案', summary: '使用 SQLite',
+    detail: '记住我们用 SQLite 存储', evidence: '记住我们用 SQLite 存储',
+  }])
+  const { callRoute } = createHarness(t, { sessions, agents, observations, llmResult })
+
+  const pA = (await callRoute('POST', '/persona', { id: '', name: 'A', instructions: '' })).json.id
+  const pB = (await callRoute('POST', '/persona', { id: '', name: 'B', instructions: '' })).json.id
+  await callRoute('POST', '/bind', { session: 'other', persona: pB })
+
+  const first = await callRoute('POST', '/history/import', {
+    persona: pA,
+    sessions: ['good', 'other', 'broken'],
+    activeSession: 'active',
+  })
+  assert.equal(first.status, 200)
+  assert.equal(first.json.boundSessions, 1)
+  assert.equal(first.json.queuedChunks, 1)
+  assert.equal(first.json.duplicateChunks, 0)
+  assert.deepEqual(first.json.skipped, [
+    { id: 'other', reason: 'bound-to-other' },
+    { id: 'broken', reason: 'read-failed' },
+  ])
+
+  // 等待队列消费完成并写入 imported_chunks
+  await new Promise(resolve => setTimeout(resolve, 40))
+  const status = (await callRoute('GET', `/history/import/status?persona=${pA}`)).json
+  assert.equal(status.pending, 0)
+
+  const second = await callRoute('POST', '/history/import', {
+    persona: pA,
+    sessions: ['good'],
+    activeSession: 'active',
+  })
+  assert.equal(second.json.queuedChunks, 0)
+  assert.equal(second.json.duplicateChunks, 1)
+
+  const memories = (await callRoute('GET', `/index?persona=${pA}&q=SQLite`)).json
+  assert.equal(memories.length, 1)
+  assert.equal(memories[0].turn, -1)
+  assert.equal(memories[0].source, 'import')
 })
 
 test('history lookup turn allows non-history tools, denies native history tools, and still enqueues extraction', async t => {

@@ -44,6 +44,9 @@ window.__ModuleLoader__.load({
         importing: '提炼中…', filterChats: '筛选旧对话标题', noChats: '暂无可导入的旧对话',
         unbound: '未绑定',
         instructionsHint: '修改后，已绑定的会话从下一轮起生效',
+        queuedPrefix: '已排队 ', queuedMid: ' 段，跳过重复 ', queuedSuffix: ' 段',
+        importDone: '记忆提炼完成', currentPersona: '当前人格', boundPrefix: '已绑定：',
+        importedTurn: '导入',
       },
       en: {
         title: 'Persona Continuity', normal: 'Standard chat', persona: 'Persona', new: 'New persona', name: 'Name',
@@ -63,6 +66,9 @@ window.__ModuleLoader__.load({
         importing: 'Extracting…', filterChats: 'Filter past chats', noChats: 'No past chats found',
         unbound: 'Unbound',
         instructionsHint: 'Changes take effect on the next turn for bound chats',
+        queuedPrefix: 'Queued ', queuedMid: ' chunks, skipped ', queuedSuffix: ' duplicates',
+        importDone: 'Memory extraction complete', currentPersona: 'Current persona', boundPrefix: 'Bound to: ',
+        importedTurn: 'Imported',
       },
     }
 
@@ -76,12 +82,31 @@ window.__ModuleLoader__.load({
     const panelStyle = { display: 'grid', gap: 12, maxWidth: 720 }
     const errorMessage = error => error ? h('span', { role: 'alert' }, error) : null
     const statePath = id => '/state?session=' + encodeURIComponent(id ?? '')
+    const queuedText = (t, result) =>
+      t('queuedPrefix') + result.queuedChunks + t('queuedMid') + result.duplicateChunks + t('queuedSuffix')
+
+    function useImportPoll(personaId, active, onDone) {
+      useEffect(() => {
+        if (!active || !personaId) return
+        let live = true
+        const timer = setInterval(() => {
+          call('/history/import/status?persona=' + encodeURIComponent(personaId)).then(
+            status => {
+              if (live && status.pending === 0) onDone()
+            },
+            () => {},
+          )
+        }, 2000)
+        return () => { live = false; clearInterval(timer) }
+      }, [personaId, active])
+    }
 
     function Picker({ sessionId, t }) {
       const [state, setState] = useState(null)
       const [pending, setPending] = useState(false)
       const [error, setError] = useState('')
       const [notice, setNotice] = useState('')
+      const [pollingPersona, setPollingPersona] = useState('')
       const [mode, setMode] = useState(null)
       const [name, setName] = useState('')
       const [renameId, setRenameId] = useState('')
@@ -124,6 +149,12 @@ window.__ModuleLoader__.load({
         }
       }
 
+      useImportPoll(pollingPersona, Boolean(pollingPersona), () => {
+        setPollingPersona('')
+        setNotice(t('importDone'))
+        window.dispatchEvent(new Event(changedEvent))
+      })
+
       async function extractCurrent() {
         setMode(null)
         if (!state.selected || pending) return
@@ -134,7 +165,8 @@ window.__ModuleLoader__.load({
           const result = await call('/history/import', {
             persona: state.selected, sessions: [sessionId], activeSession: sessionId,
           })
-          setNotice('已提炼 ' + result.extractedMemories + ' 条记忆')
+          setNotice(queuedText(t, result))
+          if (result.queuedChunks > 0) setPollingPersona(state.selected)
           window.dispatchEvent(new Event(changedEvent))
         } catch (failure) {
           setError(failure.message)
@@ -350,7 +382,8 @@ window.__ModuleLoader__.load({
 
       return h('details', null,
         h('summary', null, row.title, ' · ', row.summary),
-        h('p', { style: { overflowWrap: 'anywhere' } }, t('source'), ' ', row.session, ' · ', t('turn'), ' ', row.turn),
+        h('p', { style: { overflowWrap: 'anywhere' } }, t('source'), ' ', row.session, ' · ', t('turn'), ' ',
+          row.turn < 0 ? t('importedTurn') : row.turn),
         edits ? h('form', {
           style: panelStyle, onSubmit: event => {
             event.preventDefault()
@@ -453,7 +486,7 @@ window.__ModuleLoader__.load({
                 h('span', { style: { fontSize: 12, opacity: 0.75 } },
                   new Date(item.createdAt).toLocaleString() + ' · ' +
                   (item.personaId
-                    ? (item.personaId === id ? '当前人格' : '已绑定：' + item.personaName + t('cannotImportBound'))
+                    ? (item.personaId === id ? t('currentPersona') : t('boundPrefix') + item.personaName + t('cannotImportBound'))
                     : t('unbound'))),
               ))
             })),
@@ -468,7 +501,15 @@ window.__ModuleLoader__.load({
       const [error, setError] = useState('')
       const [importOpen, setImportOpen] = useState(false)
       const [notice, setNotice] = useState('')
+      const [polling, setPolling] = useState(false)
       const persona = '?persona=' + encodeURIComponent(id)
+
+      useImportPoll(id, polling, () => {
+        setPolling(false)
+        setNotice(t('importDone'))
+        setRevision(current => current + 1)
+        window.dispatchEvent(new Event(changedEvent))
+      })
 
       useEffect(() => {
         let live = true
@@ -501,7 +542,8 @@ window.__ModuleLoader__.load({
         h(HistoryImportModal, {
           id, t, open: importOpen, onClose: () => setImportOpen(false),
           onImported: result => {
-            setNotice('已绑定 ' + (result.importedSessions + result.skippedSessions) + ' 段对话，提炼写入 ' + result.extractedMemories + ' 条记忆')
+            setNotice(queuedText(t, result))
+            if (result.queuedChunks > 0) setPolling(true)
             setRevision(current => current + 1)
           },
         }),

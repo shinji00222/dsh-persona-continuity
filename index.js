@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { Store } from './lib/store.js'
@@ -199,9 +200,10 @@ export function apply(ctx) {
       const target = resolveModel(typeof activeSession === 'string' ? activeSession : '')
       if (!target) throw new Error('请先打开一个已选好模型的对话，再提炼记忆')
 
-      let importedSessions = 0
+      let boundSessions = 0
+      let queuedChunks = 0
+      let duplicateChunks = 0
       const skipped = []
-      let extractedMemories = 0
       for (const sessionId of ids) {
         const existing = store.personaFor(sessionId)?.id ?? ''
         if (existing && existing !== persona) {
@@ -215,31 +217,49 @@ export function apply(ctx) {
           skipped.push({ id: sessionId, reason: 'busy' })
           continue
         }
-        const readSignal = AbortSignal.any([lifetime.signal, AbortSignal.timeout(10000)])
-        const { workspace, chunks } = await readConversationChunks(ctx.sessionQuery, sessionId, readSignal)
+        let read
+        try {
+          const readSignal = AbortSignal.any([lifetime.signal, AbortSignal.timeout(10000)])
+          read = await readConversationChunks(ctx.sessionQuery, sessionId, readSignal)
+        } catch {
+          skipped.push({ id: sessionId, reason: 'read-failed' })
+          continue
+        }
         if (!existing) {
           store.bind(sessionId, persona)
           if (liveAgent) attach(liveAgent)
+          boundSessions++
         }
-        if (!chunks.length) {
+        if (!read.chunks.length) {
           skipped.push({ id: sessionId, reason: 'empty' })
           continue
         }
-        for (const chunk of chunks) {
-          const signal = AbortSignal.any([lifetime.signal, AbortSignal.timeout(45000)])
-          const known = store.topics(persona, workspace)
-          const items = await extract(ctx.llm, {
-            session: sessionId, persona, workspace, provider: target.provider, model: target.model,
+        for (let i = 0; i < read.chunks.length; i++) {
+          const chunk = read.chunks[i]
+          const hash = createHash('sha256').update(chunk.user + '\n\0\n' + chunk.assistant).digest('hex')
+          if (store.isImported(persona, sessionId, hash)) {
+            duplicateChunks++
+            continue
+          }
+          const added = store.enqueue({
+            session: sessionId,
+            turn: -(i + 1),
+            persona,
+            workspace: read.workspace,
+            provider: target.provider,
+            model: target.model,
             input: JSON.stringify({ user: chunk.user, assistant: chunk.assistant }),
-          }, known, signal)
-          extractedMemories += store.transaction(() => store.saveExtractedMemories({
-            persona, session: sessionId, turn: chunk.turn, workspace, created: Date.now(), items,
-          }))
+            source: 'import',
+            chunk_hash: hash,
+          })
+          if (added) queuedChunks++
+          else duplicateChunks++
         }
-        importedSessions++
       }
-      return { importedSessions, skippedSessions: skipped.length, skipped, extractedMemories }
+      if (queuedChunks > 0) queueMicrotask(drain)
+      return { boundSessions, queuedChunks, duplicateChunks, skipped }
     },
+    importStatus: persona => store.importProgress(persona),
   }
 
   ctx.effect(() => {
