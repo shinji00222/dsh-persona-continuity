@@ -483,6 +483,23 @@ window.__ModuleLoader__.load({
     const surveyTextarea = { ...textareaStyle, boxSizing: 'border-box', resize: 'vertical', padding: 8, borderRadius: 8 }
     const jobStatus = { queued: '排队中', running: '作答中', done: '已完成', failed: '失败' }
 
+    function safeSpreadsheetText(value) {
+      const text = String(value ?? '')
+      return /^\s*[=+@-]/u.test(text) ? "'" + text : text
+    }
+
+    function downloadTextFile(body, filename, type) {
+      const url = URL.createObjectURL(new Blob(['\uFEFF', body], { type: type + ';charset=utf-8' }))
+      const link = document.createElement('a')
+      link.href = url
+      link.download = filename
+      document.body.append(link)
+      try { link.click() } finally {
+        link.remove()
+        setTimeout(() => URL.revokeObjectURL(url), 1000)
+      }
+    }
+
     function downloadSurveyResults(result) {
       const rows = [
         ['角色编号', '角色名称', '分组', '状态', '失败原因', ...result.questions.map(question => question.text)],
@@ -492,21 +509,75 @@ window.__ModuleLoader__.load({
             ...result.questions.map(question => answers.get(question.id))]
         }),
       ]
-      const encodeCell = value => {
-        const text = String(value ?? '')
-        const escaped = /^\s*[=+@-]/u.test(text) ? "'" + text : text
-        return '"' + escaped.replace(/"/g, '""') + '"'
+      const encodeCell = value => '"' + safeSpreadsheetText(value).replace(/"/g, '""') + '"'
+      const body = rows.map(row => row.map(encodeCell).join(',')).join('\r\n') + '\r\n'
+      const name = '问卷答卷-' + result.title.replace(/[<>:"/\\|?*\u0000-\u001f]/gu, '_').slice(0, 80) + '.csv'
+      downloadTextFile(body, name, 'text/csv')
+    }
+
+    const calibrationHeader = '题目ID\t题干\t选项序号\t选项\t人数'
+    const calibrationGroup = cohort => cohort === null ? '全部角色' : '分组：' + (cohort || '未分组')
+    const tsvLabel = value => value.replace(/[\r\n\t]+/gu, ' ').replaceAll('"', '”').trim()
+
+    function downloadCalibrationTemplate(questions, runId, cohort) {
+      const rows = [
+        '运行编号\t' + runId,
+        '对比分组\t' + tsvLabel(calibrationGroup(cohort)),
+        '数据来源\t',
+        '样本总人数\t',
+        calibrationHeader,
+        ...questions.flatMap(question => question.options.map((option, index) => [
+          safeSpreadsheetText(question.id), safeSpreadsheetText(tsvLabel(question.text)), index + 1,
+          safeSpreadsheetText(tsvLabel(option)), '',
+        ].join('\t'))),
+      ]
+      downloadTextFile(rows.join('\r\n') + '\r\n', '真人校准模板.tsv', 'text/tab-separated-values')
+    }
+
+    async function readCalibrationFile(file, questions, runId, cohort) {
+      if (file.size > 200000) throw new Error('校准文件须小于 200 KB')
+      const text = (await file.text()).replace(/^\uFEFF/u, '')
+      if (/\.json$/iu.test(file.name)) {
+        let input
+        try { input = JSON.parse(text) }
+        catch { throw new Error('JSON 格式有误，请检查文件') }
+        if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('JSON 需要 source、total 和 rows')
+        if ((input.runId !== undefined && input.runId !== runId) ||
+          (input.cohort !== undefined && input.cohort !== cohort)) throw new Error('文件的运行记录或分组与当前选择不一致')
+        return { source: input.source, total: input.total, rows: input.rows }
       }
-      const body = '\uFEFF' + rows.map(row => row.map(encodeCell).join(',')).join('\r\n') + '\r\n'
-      const url = URL.createObjectURL(new Blob([body], { type: 'text/csv;charset=utf-8' }))
-      const link = document.createElement('a')
-      link.href = url
-      link.download = '问卷答卷-' + result.title.replace(/[<>:"/\\|?*\u0000-\u001f]/gu, '_').slice(0, 80) + '.csv'
-      document.body.append(link)
-      try { link.click() } finally {
-        link.remove()
-        setTimeout(() => URL.revokeObjectURL(url), 1000)
+      if (!/\.tsv$/iu.test(file.name)) throw new Error('请选择 JSON 或 TSV 文件')
+      const lines = text.split(/\r?\n/u)
+      const metadata = ['运行编号', '对比分组', '数据来源', '样本总人数'].map((key, index) => {
+        const row = lines[index]?.split('\t')
+        if (row?.[0] !== key) throw new Error('TSV 格式有误，请从当前校准页下载模板')
+        return row[1]?.trim() ?? ''
+      })
+      if (lines[4]?.trim() !== calibrationHeader) throw new Error('TSV 表头有误，请使用下载的模板')
+      if (metadata[0] !== runId || metadata[1] !== tsvLabel(calibrationGroup(cohort))) {
+        throw new Error('文件的运行记录或分组与当前选择不一致')
       }
+      const rows = new Map()
+      const seen = new Set()
+      for (const [index, line] of lines.slice(5).entries()) {
+        if (!line.trim()) continue
+        const [id, prompt, position, option, entry = '', ...extra] = line.split('\t').map(cell => cell.trim())
+        const question = questions.find(question => id === question.id || id === safeSpreadsheetText(question.id))
+        const slot = Number(position) - 1
+        const matchesLabel = (value, label) => value === tsvLabel(label) || value === safeSpreadsheetText(tsvLabel(label))
+        if (extra.length || !question || !Number.isInteger(slot) || question.options[slot] === undefined ||
+          !matchesLabel(prompt, question.text) || !matchesLabel(option, question.options[slot])) {
+          throw new Error('第 ' + (index + 6) + ' 行的题目或选项与当前运行不一致')
+        }
+        const key = JSON.stringify([question.id, slot])
+        if (seen.has(key)) throw new Error('第 ' + (index + 6) + ' 行重复填写了同一选项')
+        seen.add(key)
+        if (!entry) continue
+        if (!/^\d+$/u.test(entry)) throw new Error('第 ' + (index + 6) + ' 行人数须为非负整数')
+        if (!rows.has(question.id)) rows.set(question.id, question.options.map(() => 0))
+        rows.get(question.id)[slot] = Number(entry)
+      }
+      return { source: metadata[2], total: Number(metadata[3]), rows: [...rows].map(([id, counts]) => ({ id, counts })) }
     }
 
     const field = (label, control) => h('label', { style: surveyField }, h('span', null, label), control)
@@ -716,6 +787,23 @@ window.__ModuleLoader__.load({
       const [notice, setNotice] = useState('')
       const [error, setError] = useState('')
       const jobs = result.jobs.filter(job => cohort === null || job.group === cohort)
+      async function importCalibration(file) {
+        setBusy(true)
+        setNotice('')
+        setError('')
+        try {
+          const data = await readCalibrationFile(file, questions, runId, cohort)
+          const checked = await call('/simulation/calibration/validate', { ...data, id: runId, cohort })
+          setSource(checked.source)
+          setTotal(String(checked.total))
+          setCounts(Object.fromEntries(checked.rows.map(row => [row.id, row.counts.map(String)])))
+          setNotice('已导入 ' + checked.rows.length + ' 道题，请核对后点「保存并对比」')
+        } catch (failure) {
+          setError(failure.message)
+        } finally {
+          setBusy(false)
+        }
+      }
       async function save(event) {
         event.preventDefault()
         setBusy(true)
@@ -737,6 +825,15 @@ window.__ModuleLoader__.load({
       return h('div', { style: surveyColumns },
         h('form', { style: surveyCard, onSubmit: save },
           h('h2', null, '录入真人数据'),
+          action('下载 TSV 模板', () => downloadCalibrationTemplate(questions, runId, cohort), busy),
+          field('导入真人数据（TSV 或 JSON）', h('input', {
+            type: 'file', accept: '.tsv,.json', disabled: busy,
+            onChange: event => {
+              const file = event.target.files[0]
+              event.target.value = ''
+              if (file) void importCalibration(file)
+            },
+          })),
           field('数据来源', surveyInput(source, setSource, { required: true, maxLength: 120, placeholder: '例如 11 月校园问卷' })),
           field('样本总人数', surveyInput(total, setTotal, { type: 'number', required: true, min: 1, max: 1000000 })),
           h('p', null, '按题填写各选项人数。少于样本总人数的部分计为缺答，整题留空表示暂无数据。'),
