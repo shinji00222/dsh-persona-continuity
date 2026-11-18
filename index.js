@@ -18,8 +18,17 @@ function supported(session) {
     !String(session.id).startsWith('session-incognito-')
 }
 
+function hasActiveTurn(session) {
+  let active = false
+  for (const event of session?.snapshotEvents?.() ?? []) {
+    if (event.type === 'turn/start') active = true
+    else if (event.type === 'turn/end') active = false
+  }
+  return active
+}
+
 function isSessionIdle(session, agent, id, turns) {
-  if (!supported(session) || session.requestHeader?.() || turns.has(id)) return false
+  if (!supported(session) || turns.has(id) || hasActiveTurn(session)) return false
   return !(agent?.inbox?.nextTurn?.length || agent?.inbox?.nextStep?.length)
 }
 

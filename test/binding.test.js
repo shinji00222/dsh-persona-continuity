@@ -88,11 +88,13 @@ function createHarness(t, { sessions, agents, observations = {}, llmResult = '[]
   return { callRoute, emit }
 }
 
-const makeSession = (id, events = [], { busy = false } = {}) => ({
+const makeSession = (id, events = [], { busy = false, hasConfig = events.length > 0 } = {}) => ({
   id,
   header: { id, cwd: 'ws', createdAt: 100 },
-  snapshotEvents: () => events,
-  requestHeader: () => (busy ? { config: { provider: 'mock', model: 'm1' } } : undefined),
+  snapshotEvents: () => busy
+    ? [...events, { type: 'turn/start', data: { turn: 99 } }]
+    : events,
+  requestHeader: () => (busy || hasConfig ? { config: { provider: 'mock', model: 'm1' } } : undefined),
 })
 
 const makeAgent = (id, session) => ({

@@ -268,6 +268,9 @@ window.__ModuleLoader__.load({
             onClick: () => {
               if (!canOpen) return
               setError('')
+              if (mode !== 'menu') {
+                void call(statePath(sessionId)).then(setState, () => {})
+              }
               setMode(mode === 'menu' ? null : 'menu')
             },
           },
