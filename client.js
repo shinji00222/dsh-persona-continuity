@@ -527,13 +527,15 @@ window.__ModuleLoader__.load({
             : h('p', null, '导入或选择批次后，这里会显示学生名单。')))
     }
 
-    function SurveyEditors({ roles, setRoles, questions, setQuestions }) {
+    function SurveyEditors({ roles, setRoles, questions, setQuestions, onManageRoles }) {
       const [page, setPage] = useState(0)
       const first = Math.min(page, Math.max(0, Math.ceil(roles.length / 10) - 1)) * 10
       const remove = (setter, index) => setter(items => items.filter((_, position) => position !== index))
       return h('div', { style: surveyColumns },
         h('section', { style: surveyCard },
-          h('h2', null, '受访角色'),
+          h('div', { style: { ...actionsStyle, alignItems: 'center', justifyContent: 'space-between' } },
+            h('h2', null, '受访角色'),
+            action('批量管理', onManageRoles)),
           roles.slice(first, first + 10).map((role, slot) => {
             const index = first + slot
             return h('fieldset', { key: role.id, style: surveyCard },
@@ -653,6 +655,7 @@ window.__ModuleLoader__.load({
       const [tab, setTab] = useState('draft')
       const [cohort, setCohort] = useState(null)
       const [questionnaireId, setQuestionnaireId] = useState('')
+      const [questionnaireMenu, setQuestionnaireMenu] = useState(false)
       const [notice, setNotice] = useState('')
       const batches = useSurveyLibrary('batches')
       const questionnaires = useSurveyLibrary('questionnaires')
@@ -768,6 +771,20 @@ window.__ModuleLoader__.load({
         })
       }
 
+      function chooseQuestionnaire(id) {
+        setQuestionnaireMenu(false)
+        if (id !== createOption) {
+          if (id !== (questionnaireId || normalOption)) openQuestionnaire(id === normalOption ? '' : id)
+          return
+        }
+        setQuestionnaireId('')
+        setTitle('')
+        setMaterial('')
+        setQuestions([{ id: crypto.randomUUID(), text: '', options: ['', ''] }])
+        setNotice('')
+        setError('')
+      }
+
       const done = result?.jobs.filter(job => job.status === 'done' || job.status === 'failed').length ?? 0
       const chooseRun = event => {
         setResult(null)
@@ -777,6 +794,7 @@ window.__ModuleLoader__.load({
       }
       const groups = [...new Set(result?.jobs.map(job => job.group))]
       const activeCalibration = result?.calibration.find(item => item.cohort === cohort)
+      const questionnaireLabel = questionnaires.items.find(item => item.id === questionnaireId)?.title ?? '当前草稿'
       return h('main', { style: { minWidth: 0, width: '100%', height: '100%', overflow: 'auto', boxSizing: 'border-box' } },
         h('div', { style: { maxWidth: 1180, padding: '24px clamp(14px, 3vw, 36px)', margin: '0 auto', display: 'grid', gap: 18 } },
           h('header', { style: surveyField },
@@ -797,18 +815,23 @@ window.__ModuleLoader__.load({
             h('section', { style: surveyCard },
               h('h2', null, '基本设置'),
               h('div', { style: { ...actionsStyle, alignItems: 'end' } },
-                field('已保存问卷', h('select', {
-                  value: questionnaireId, disabled: busy, style: { ...selectStyle, maxWidth: '100%' },
-                  onChange: event => openQuestionnaire(event.target.value),
-                }, h('option', { value: '' }, '当前草稿'), questionnaires.items.map(item =>
-                  h('option', { key: item.id, value: item.id }, item.title + ' · ' + item.count + ' 题')))),
-                action('新建空白问卷', () => {
-                  setQuestionnaireId('')
-                  setTitle('')
-                  setMaterial('')
-                  setQuestions([{ id: crypto.randomUUID(), text: '', options: ['', ''] }])
-                  setNotice('')
-                }, busy),
+                h('div', { style: surveyField },
+                  h('span', null, '已保存问卷'),
+                  h(Menu, {
+                    open: questionnaireMenu, onClose: () => setQuestionnaireMenu(false),
+                    onSelect: chooseQuestionnaire, selectedId: questionnaireId || normalOption, align: 'start', portal: true,
+                    items: [
+                      { id: normalOption, label: '当前草稿' },
+                      { id: createOption, label: '新建空白问卷', icon: h(IconPlusOutlineRegular, { size: 16, 'aria-hidden': true }) },
+                      ...questionnaires.items.map(item => ({ id: item.id, label: item.title + ' · ' + item.count + ' 题' })),
+                    ],
+                    anchor: h(Button, {
+                      size: 'sm', type: 'button', variant: 'outline', disabled: busy,
+                      'aria-label': '已保存问卷：' + questionnaireLabel, 'aria-haspopup': 'menu',
+                      'aria-expanded': questionnaireMenu, onClick: () => setQuestionnaireMenu(open => !open),
+                    }, h('span', { style: { ...labelStyle, maxWidth: '14em' } }, questionnaireLabel),
+                    h(IconChevronDownOutlineRegular, { size: 14, 'aria-hidden': true })),
+                  })),
                 action(questionnaireId ? '保存修改' : '保存问卷', () => saveQuestionnaire(questionnaireId), busy),
                 questionnaireId && action('另存为新问卷', () => saveQuestionnaire(''), busy),
                 questionnaireId && action('删除问卷', () => {
@@ -831,7 +854,7 @@ window.__ModuleLoader__.load({
               h('div', { style: actionsStyle },
                 h(Button, { type: 'submit', variant: 'primary', disabled: busy || !models?.[model] }, busy ? '处理中…' : '运行问卷'),
                 h('span', null, roles.length + ' 个角色 · ' + questions.length + ' 道题'))),
-            h(SurveyEditors, { roles, setRoles, questions, setQuestions })),
+            h(SurveyEditors, { roles, setRoles, questions, setQuestions, onManageRoles: () => setTab('students') })),
           (tab === 'results' || tab === 'calibration') && (runs.length ? h('div', { style: actionsStyle },
             field('运行记录', h('select', { value: id, style: { ...selectStyle, maxWidth: '100%' }, disabled: busy, onChange: chooseRun },
               runs.map(run => h('option', { key: run.id, value: run.id },
