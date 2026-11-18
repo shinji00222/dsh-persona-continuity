@@ -1,6 +1,6 @@
 # 人格续忆 · DSH Persona Continuity
 
-给 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的每个「人格」一份独立的跨会话长期记忆；顺带把「让大模型扮演一群受访者填问卷，再用真人数据校准」做成了插件里的一个工作台。
+给 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的每个「人格」一份独立的跨会话长期记忆；顺带把「让大模型扮演一群受访者填问卷，再用真人数据校准」做成了插件里的一个工作台。做完了才发现，好像还可以搞人机恋。
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![DSH](https://img.shields.io/badge/DSH-0.2.x-4B6EF5)
