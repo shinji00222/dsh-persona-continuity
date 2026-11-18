@@ -397,6 +397,32 @@ window.__ModuleLoader__.load({
     const surveyTextarea = { ...textareaStyle, boxSizing: 'border-box', resize: 'vertical', padding: 8, borderRadius: 8 }
     const jobStatus = { queued: '排队中', running: '作答中', done: '已完成', failed: '失败' }
 
+    function downloadSurveyResults(result) {
+      const rows = [
+        ['角色编号', '角色名称', '分组', '状态', '失败原因', ...result.questions.map(question => question.text)],
+        ...result.jobs.map(job => {
+          const answers = new Map(job.answers.map(answer => [answer.id, answer.answer]))
+          return [job.role, job.name, job.group, jobStatus[job.status], job.error,
+            ...result.questions.map(question => answers.get(question.id))]
+        }),
+      ]
+      const encodeCell = value => {
+        const text = String(value ?? '')
+        const escaped = /^\s*[=+@-]/u.test(text) ? "'" + text : text
+        return '"' + escaped.replace(/"/g, '""') + '"'
+      }
+      const body = '\uFEFF' + rows.map(row => row.map(encodeCell).join(',')).join('\r\n') + '\r\n'
+      const url = URL.createObjectURL(new Blob([body], { type: 'text/csv;charset=utf-8' }))
+      const link = document.createElement('a')
+      link.href = url
+      link.download = '问卷答卷-' + result.title.replace(/[<>:"/\\|?*\u0000-\u001f]/gu, '_').slice(0, 80) + '.csv'
+      document.body.append(link)
+      try { link.click() } finally {
+        link.remove()
+        setTimeout(() => URL.revokeObjectURL(url), 1000)
+      }
+    }
+
     const field = (label, control) => h('label', { style: surveyField }, h('span', null, label), control)
     const action = (label, onClick, disabled = false) =>
       h(Button, { type: 'button', size: 'sm', variant: 'outline', onClick, disabled, style: { justifySelf: 'start' } }, label)
@@ -868,7 +894,9 @@ window.__ModuleLoader__.load({
               h('p', null, tab === 'calibration' ? '先运行问卷，再录入该次运行对应的真人数据。' : '运行问卷后查看结果。'),
               action('前往问卷设计', () => setTab('draft')))),
           tab === 'results' && result && h('section', { style: surveyCard },
-              h('h2', null, '逐人答卷'),
+              h('div', { style: { ...actionsStyle, alignItems: 'center', justifyContent: 'space-between' } },
+                h('h2', null, '逐人答卷'),
+                action('导出答卷 CSV', () => downloadSurveyResults(result))),
               h('label', null, '已处理 ' + done + ' / ' + result.jobs.length,
                 h('progress', { value: done, max: result.jobs.length, style: textareaStyle })),
               action('前往校准', () => setTab('calibration')),
