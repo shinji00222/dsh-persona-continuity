@@ -54,6 +54,13 @@ test('survey snapshots and isolates each role, bounds concurrency and retries on
     assert.equal(seen.length, 101)
     assert.equal(retried.status, 'done')
     assert.deepEqual(retried.answers, [{ id: 'choice', answer: 'yes' }, { id: 'comment', answer: null }])
+    const calibration = { id, cohort: null, source: 'Field survey', total: 32, rows: [{ id: 'choice', counts: [18, 12] }] }
+    assert.deepEqual(simulation.calibrate(calibration), { saved: true })
+    assert.throws(() => simulation.calibrate({ ...calibration, total: 29 }), /不能超过/)
+    assert.throws(() => simulation.calibrate({ ...calibration, cohort: 'Unknown' }), /不属于/)
+    assert.deepEqual(simulation.result(id).calibration, [{
+      cohort: null, source: 'Field survey', total: 32, rows: [{ id: 'choice', counts: [18, 12] }],
+    }])
   } finally {
     lifetime.abort()
     store.close()
