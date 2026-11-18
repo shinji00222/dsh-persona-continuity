@@ -374,13 +374,16 @@ window.__ModuleLoader__.load({
     }
 
     const sampleRoles = [
-      { id: '学生甲', group: '住校', background: '住在校内，晚间常去图书馆学习。步行到宿舍约十分钟。' },
-      { id: '学生乙', group: '通勤', background: '住在校外，晚课结束后需要从校门返回地铁站。' },
+      { id: 'patient-1', name: '初诊患者', group: '患者', background: '第一次就诊，听到专业术语容易紧张，倾向于回家再看说明。' },
+      { id: 'patient-2', name: '复诊患者', group: '患者', background: '需要在工作日安排复诊，希望记住这次沟通中提到的事项。' },
+      { id: 'doctor-1', name: '门诊医生', group: '医生', background: '门诊时间紧，希望用简洁的表达，并确认患者理解了关键事项。' },
     ]
     const sampleQuestions = [
-      { id: 'use', text: '你每周预计使用几次夜间接驳车？', options: ['不会使用', '一至两次', '三次或以上'] },
-      { id: 'concern', text: '哪些因素会影响你的选择？' },
+      { id: 'clarity', text: '从你的角色看，本次用药沟通中关键信息讲清楚了吗？', options: ['清楚', '部分清楚', '不清楚'] },
+      { id: 'confirmation', text: '本次沟通中，患者有没有用自己的话确认理解？', options: ['有', '没有', '不确定'] },
+      { id: 'remaining', text: '还有哪些疑问，或哪一步沟通可以更清楚？' },
     ]
+    const sampleMaterial = '这是虚构的门诊沟通场景。就诊结束时，医生介绍了用药安排，并交给患者一份书面说明。双方需要确认患者理解了哪些信息，还有哪些疑问。请评价沟通过程。'
     const surveyColumns = {
       display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))',
       gap: 20, alignItems: 'start',
@@ -405,20 +408,149 @@ window.__ModuleLoader__.load({
     const updateItem = (setter, index, patch) =>
       setter(items => items.map((item, position) => position === index ? { ...item, ...patch } : item))
 
+    function useSurveyLibrary(kind) {
+      const path = '/simulation/' + kind
+      const [items, setItems] = useState([])
+      const [error, setError] = useState('')
+      const refresh = () => call(path).then(setItems)
+      useEffect(() => {
+        let live = true
+        call(path).then(value => { if (live) setItems(value) }, failure => { if (live) setError(failure.message) })
+        return () => { live = false }
+      }, [path])
+      return {
+        items, error, refresh,
+        read: id => call(path + '/item?id=' + encodeURIComponent(id)),
+        save: data => call(path + '/save', data),
+        remove: id => call(path + '/remove', { id }),
+      }
+    }
+
+    const tsvHeader = '编号\t名称\t分组\t背景'
+    function readStudentSheet(text) {
+      const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/u).filter(line => line.trim())
+      if (lines[0]?.trim() !== tsvHeader) throw new Error('请用「编号、名称、分组、背景」四列表头，并从表格复制或导入 TSV。')
+      if (lines.length < 2) throw new Error('请至少录入一名学生')
+      return lines.slice(1).map((line, index) => {
+        const columns = line.split('\t').map(value => value.trim())
+        if (columns.length !== 4 || !columns[0] || !columns[3]) throw new Error('第 ' + (index + 2) + ' 行需要四列，编号和背景必填')
+        const [id, name, group, background] = columns
+        return { id, name, group, background }
+      })
+    }
+
+    function StudentBatches({ library, onApply }) {
+      const [id, setId] = useState('')
+      const [title, setTitle] = useState('')
+      const [sheet, setSheet] = useState(tsvHeader + '\n')
+      const [preview, setPreview] = useState([])
+      const [busy, setBusy] = useState(false)
+      const [error, setError] = useState('')
+      const [notice, setNotice] = useState('')
+
+      async function perform(run) {
+        setBusy(true)
+        setError('')
+        setNotice('')
+        try { await run() } catch (failure) { setError(failure.message) }
+        finally { setBusy(false) }
+      }
+      function reset() {
+        setId('')
+        setTitle('')
+        setSheet(tsvHeader + '\n')
+        setPreview([])
+        setNotice('')
+        setError('')
+      }
+      function load(id) {
+        if (!id) return reset()
+        void perform(async () => {
+          const batch = await library.read(id)
+          const rows = batch.roles.map(role => [role.id, role.name, role.group, role.background]
+            .map(value => value.replace(/[\t\r\n]+/gu, ' ')).join('\t'))
+          setId(id)
+          setTitle(batch.title)
+          setSheet([tsvHeader, ...rows].join('\n'))
+          setPreview(batch.roles)
+        })
+      }
+      function changeSheet(value) {
+        setSheet(value)
+        setPreview([])
+        setNotice('')
+      }
+      return h('div', { style: surveyColumns },
+        h('section', { style: surveyCard },
+          h('h2', null, '学生批次'),
+          field('已保存批次', h('select', {
+            value: id, disabled: busy, onChange: event => load(event.target.value), style: { ...selectStyle, maxWidth: '100%' },
+          }, h('option', { value: '' }, '新建批次'), library.items.map(batch =>
+            h('option', { key: batch.id, value: batch.id }, batch.title + ' · ' + batch.count + ' 人')))),
+          field('批次名称', surveyInput(title, setTitle, { maxLength: 100 })),
+          field('导入 TSV 文件', h('input', {
+            type: 'file', accept: '.tsv,.txt,text/tab-separated-values', disabled: busy,
+            onChange: event => {
+              const file = event.target.files[0]
+              event.target.value = ''
+              if (file) void perform(async () => changeSheet(await file.text()))
+            },
+          })),
+          field('粘贴表格', surveyText(sheet, changeSheet, 8)),
+          h('p', null, '从表格复制「编号、名称、分组、背景」四列，保留表头。每行一人，编号和背景必填。'),
+          h('div', { style: actionsStyle },
+            action('预览学生', () => perform(async () => setPreview(readStudentSheet(sheet))), busy),
+            action('保存批次', () => perform(async () => {
+              const roles = readStudentSheet(sheet)
+              const saved = await library.save({ id, title, roles })
+              setId(saved.id)
+              setPreview(roles)
+              await library.refresh()
+              setNotice('批次已保存')
+            }), busy),
+            id && action('删除批次', () => {
+              if (window.confirm('删除选中的学生批次？')) void perform(async () => {
+                await library.remove(id)
+                reset()
+                await library.refresh()
+              })
+            }, busy)),
+          errorMessage(error || library.error),
+          notice && h('p', { role: 'status' }, notice)),
+        h('section', { style: surveyCard },
+          h('h2', null, '批次预览'),
+          preview.length ? h(React.Fragment, null,
+            h('p', null, preview.length + ' 名学生 · 显示前 ' + Math.min(preview.length, 10) + ' 名'),
+            h('ul', null, preview.slice(0, 10).map(role => h('li', { key: role.id },
+              [role.id, role.name, role.group].filter(Boolean).join(' · ')))),
+            action('用于当前问卷', () => onApply(preview), busy))
+            : h('p', null, '导入或选择批次后，这里会显示学生名单。')))
+    }
+
     function SurveyEditors({ roles, setRoles, questions, setQuestions }) {
+      const [page, setPage] = useState(0)
+      const first = Math.min(page, Math.max(0, Math.ceil(roles.length / 10) - 1)) * 10
       const remove = (setter, index) => setter(items => items.filter((_, position) => position !== index))
       return h('div', { style: surveyColumns },
         h('section', { style: surveyCard },
           h('h2', null, '受访角色'),
-          roles.map((role, index) => h('fieldset', { key: role.id, style: surveyCard },
+          roles.slice(first, first + 10).map((role, slot) => {
+            const index = first + slot
+            return h('fieldset', { key: role.id, style: surveyCard },
             h('legend', null, '角色 ' + (index + 1)),
-            field('角色名称', surveyInput(role.name, name => updateItem(setRoles, index, { name }), { required: true, maxLength: 64 })),
+            field('角色名称', surveyInput(role.name, name => updateItem(setRoles, index, { name }), { maxLength: 64 })),
             field('分组', surveyInput(role.group, group => updateItem(setRoles, index, { group }), { maxLength: 64 })),
             field('角色背景', surveyText(role.background, background => updateItem(setRoles, index, { background }), 2, 1800)),
-            action('移除角色', () => remove(setRoles, index), roles.length === 1))),
-          action('添加角色', () => setRoles(items => [...items, {
-            id: crypto.randomUUID(), name: '', group: '', background: '',
-          }]), roles.length === 100)),
+            action('移除角色', () => remove(setRoles, index), roles.length === 1))
+          }),
+          roles.length > 10 && h('div', { style: actionsStyle },
+            action('上一页', () => setPage(first / 10 - 1), first === 0),
+            h('span', null, (first + 1) + '–' + Math.min(first + 10, roles.length) + ' / ' + roles.length),
+            action('下一页', () => setPage(first / 10 + 1), first + 10 >= roles.length)),
+          action('添加角色', () => {
+            setPage(Math.floor(roles.length / 10))
+            setRoles(items => [...items, { id: crypto.randomUUID(), name: '', group: '', background: '' }])
+          })),
         h('section', { style: surveyCard },
           h('h2', null, '问卷题目'),
           questions.map((question, index) => h('fieldset', { key: question.id, style: surveyCard },
@@ -514,18 +646,23 @@ window.__ModuleLoader__.load({
     }
 
     function SimulationPanel() {
-      const [title, setTitle] = useState('校园夜间接驳问卷')
-      const [material, setMaterial] = useState('学校拟开通 21:00–23:00 夜间接驳车，每 20 分钟一班，往返图书馆、宿舍和地铁站。')
-      const [roles, setRoles] = useState(() => sampleRoles.map(role => ({ ...role, name: role.id })))
+      const [title, setTitle] = useState('医患用药沟通调查')
+      const [material, setMaterial] = useState(sampleMaterial)
+      const [roles, setRoles] = useState(sampleRoles)
       const [questions, setQuestions] = useState(sampleQuestions)
       const [tab, setTab] = useState('draft')
       const [cohort, setCohort] = useState(null)
+      const [questionnaireId, setQuestionnaireId] = useState('')
+      const [notice, setNotice] = useState('')
+      const batches = useSurveyLibrary('batches')
+      const questionnaires = useSurveyLibrary('questionnaires')
       const [models, setModels] = useState(null)
       const [model, setModel] = useState('')
       const [runs, setRuns] = useState([])
       const [id, setId] = useState('')
       const [result, setResult] = useState(null)
       const [refresh, setRefresh] = useState(0)
+      const [answerPage, setAnswerPage] = useState(0)
       const [busy, setBusy] = useState(false)
       const [error, setError] = useState('')
 
@@ -574,6 +711,7 @@ window.__ModuleLoader__.load({
           setRuns(previous => [{ id: run.id, title: title.trim() }, ...previous].slice(0, 30))
           setResult(null)
           setId(run.id)
+          setAnswerPage(0)
           setCohort(null)
           setTab('results')
         } catch (failure) {
@@ -597,9 +735,43 @@ window.__ModuleLoader__.load({
         }
       }
 
+      async function manageQuestionnaire(operation) {
+        if (busy) return
+        setBusy(true)
+        setError('')
+        setNotice('')
+        try { await operation() } catch (failure) { setError(failure.message) }
+        finally { setBusy(false) }
+      }
+      function openQuestionnaire(id) {
+        if (!id) {
+          setQuestionnaireId('')
+          setNotice('')
+          return
+        }
+        void manageQuestionnaire(async () => {
+          const saved = await questionnaires.read(id)
+          setQuestionnaireId(saved.id)
+          setTitle(saved.title)
+          setMaterial(saved.material)
+          setQuestions(saved.questions.map(question => ({
+            ...question, options: question.options.length ? question.options : null,
+          })))
+        })
+      }
+      function saveQuestionnaire(id) {
+        void manageQuestionnaire(async () => {
+          const saved = await questionnaires.save({ id, title, material, questions })
+          setQuestionnaireId(saved.id)
+          await questionnaires.refresh()
+          setNotice('问卷已保存')
+        })
+      }
+
       const done = result?.jobs.filter(job => job.status === 'done' || job.status === 'failed').length ?? 0
       const chooseRun = event => {
         setResult(null)
+        setAnswerPage(0)
         setCohort(null)
         setId(event.target.value)
       }
@@ -611,14 +783,43 @@ window.__ModuleLoader__.load({
             h('h1', { style: { margin: 0, fontSize: 28 } }, '问卷调查'),
             h('p', { style: { margin: 0 } }, '编辑问卷和受访角色，运行模拟，再用真人答卷校准。')),
           h('nav', { 'aria-label': '问卷调查', style: { display: 'flex', flexWrap: 'wrap', gap: 8 } },
-            [['draft', '问卷设计'], ['results', '模拟结果'], ['calibration', '校准']].map(([value, label]) => h(Button, {
+            [['draft', '问卷设计'], ['students', '学生批次'], ['results', '模拟结果'], ['calibration', '校准']].map(([value, label]) => h(Button, {
               key: value, type: 'button', size: 'sm', variant: tab === value ? 'primary' : 'outline',
               'aria-current': tab === value ? 'page' : undefined, onClick: () => setTab(value),
             }, label))),
-          errorMessage(error),
+          errorMessage(error || questionnaires.error),
+          tab === 'students' && h(StudentBatches, { library: batches, onApply: students => {
+            setRoles(students)
+            setNotice('已载入 ' + students.length + ' 名学生')
+            setTab('draft')
+          } }),
           tab === 'draft' && h('form', { onSubmit: start, style: { display: 'grid', gap: 18 } },
             h('section', { style: surveyCard },
               h('h2', null, '基本设置'),
+              h('div', { style: { ...actionsStyle, alignItems: 'end' } },
+                field('已保存问卷', h('select', {
+                  value: questionnaireId, disabled: busy, style: { ...selectStyle, maxWidth: '100%' },
+                  onChange: event => openQuestionnaire(event.target.value),
+                }, h('option', { value: '' }, '当前草稿'), questionnaires.items.map(item =>
+                  h('option', { key: item.id, value: item.id }, item.title + ' · ' + item.count + ' 题')))),
+                action('新建空白问卷', () => {
+                  setQuestionnaireId('')
+                  setTitle('')
+                  setMaterial('')
+                  setQuestions([{ id: crypto.randomUUID(), text: '', options: ['', ''] }])
+                  setNotice('')
+                }, busy),
+                action(questionnaireId ? '保存修改' : '保存问卷', () => saveQuestionnaire(questionnaireId), busy),
+                questionnaireId && action('另存为新问卷', () => saveQuestionnaire(''), busy),
+                questionnaireId && action('删除问卷', () => {
+                  if (window.confirm('删除选中的已保存问卷？')) void manageQuestionnaire(async () => {
+                    await questionnaires.remove(questionnaireId)
+                    setQuestionnaireId('')
+                    await questionnaires.refresh()
+                    setNotice('已删除保存的问卷')
+                  })
+                }, busy)),
+              notice && h('p', { role: 'status' }, notice),
               h('div', { style: surveyColumns },
                 field('问卷名称', surveyInput(title, setTitle, { maxLength: 100, required: true })),
                 field('运行模型', h('select', {
@@ -631,7 +832,7 @@ window.__ModuleLoader__.load({
                 h(Button, { type: 'submit', variant: 'primary', disabled: busy || !models?.[model] }, busy ? '处理中…' : '运行问卷'),
                 h('span', null, roles.length + ' 个角色 · ' + questions.length + ' 道题'))),
             h(SurveyEditors, { roles, setRoles, questions, setQuestions })),
-          tab !== 'draft' && (runs.length ? h('div', { style: actionsStyle },
+          (tab === 'results' || tab === 'calibration') && (runs.length ? h('div', { style: actionsStyle },
             field('运行记录', h('select', { value: id, style: { ...selectStyle, maxWidth: '100%' }, disabled: busy, onChange: chooseRun },
               runs.map(run => h('option', { key: run.id, value: run.id },
                 run.title + (run.created ? ' · ' + new Date(run.created).toLocaleString() : ' · 刚刚'))))),
@@ -648,7 +849,11 @@ window.__ModuleLoader__.load({
               h('label', null, '已处理 ' + done + ' / ' + result.jobs.length,
                 h('progress', { value: done, max: result.jobs.length, style: textareaStyle })),
               action('前往校准', () => setTab('calibration')),
-              result.jobs.map(job => h('details', { key: job.role },
+              result.jobs.length > 20 && h('div', { style: actionsStyle },
+                action('上一页答卷', () => setAnswerPage(page => page - 1), answerPage === 0),
+                h('span', null, (answerPage * 20 + 1) + '–' + Math.min((answerPage + 1) * 20, result.jobs.length) + ' / ' + result.jobs.length),
+                action('下一页答卷', () => setAnswerPage(page => page + 1), (answerPage + 1) * 20 >= result.jobs.length)),
+              result.jobs.slice(answerPage * 20, (answerPage + 1) * 20).map(job => h('details', { key: job.role },
                 h('summary', null, [job.name, job.group, jobStatus[job.status]].filter(Boolean).join(' · ')),
                 job.error && h('p', null, job.error),
                 job.status === 'failed' && h(Button, {
