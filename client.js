@@ -384,7 +384,56 @@ window.__ModuleLoader__.load({
       { id: 'remaining', text: '还有哪些疑问，或哪一步沟通可以更清楚？' },
     ]
     const sampleMaterial = '这是虚构的门诊沟通场景。就诊结束时，医生介绍了用药安排，并交给患者一份书面说明。双方需要确认患者理解了哪些信息，还有哪些疑问。请评价沟通过程。'
-    const importQuestionnaireOption = '__import_questionnaire__'
+    function readMarkdownQuestionnaire(text, fileName) {
+      const questions = []
+      const material = []
+      let title = ''
+      let section = ''
+      let current
+      for (const [index, raw] of text.split(/\r?\n/u).entries()) {
+        const line = raw.trim().replace(/^\*\*(.+)\*\*$/u, '$1')
+        if (!line) continue
+        const documentTitle = line.match(/^#\s+(.+)$/u)
+        if (!title && documentTitle && !current) {
+          title = documentTitle[1]
+          continue
+        }
+        const heading = line.match(/^#{2,6}\s+(.+)$/u)?.[1]
+        if (heading && /^(公共材料|背景材料|问卷说明|说明)$/u.test(heading)) {
+          section = 'material'
+          current = undefined
+          continue
+        }
+        if (heading && /^(题目|问卷题目|调查题目)$/u.test(heading)) {
+          section = 'questions'
+          current = undefined
+          continue
+        }
+        const numbered = line.match(/^(?:第\s*\d+\s*题\s*[：:]?|\d+\s*[.、)）])\s*(.+)$/u)?.[1]
+        if (heading || (numbered && section !== 'material')) {
+          const prompt = (heading ?? numbered)
+            .replace(/^\s*(?:第\s*\d+\s*题\s*[：:]?|\d+\s*[.、)）])\s*/u, '')
+            .replace(/^\s*[［\[（(](?:单选题?|开放题)[］\]）)]\s*|\s*[［\[（(](?:单选题?|开放题)[］\]）)]\s*$/gu, '')
+            .trim()
+          if (!prompt) throw new Error('第 ' + (index + 1) + ' 行缺少题干')
+          current = { id: crypto.randomUUID(), text: prompt, options: [] }
+          questions.push(current)
+          section = 'questions'
+          continue
+        }
+        if (section === 'material' || (!current && !section)) {
+          material.push(raw)
+          continue
+        }
+        const option = line.match(/^(?:[-*+]\s+|[A-Z][.、)）]\s*)(.+)$/iu)?.[1]
+        if (current && option) {
+          current.options.push(option.replace(/^[A-Z][.、)）]\s*/iu, ''))
+          continue
+        }
+        throw new Error('Markdown 第 ' + (index + 1) + ' 行无法识别。请用标题或编号写题目，用列表写选项。')
+      }
+      return { title: title || fileName.replace(/\.md$/iu, '').slice(0, 100), material: material.join('\n'), questions }
+    }
 
     async function readQuestionnaireFile(file) {
       if (file.size > 180000) throw new Error('问卷文件须小于 180 KB')
@@ -404,7 +453,8 @@ window.__ModuleLoader__.load({
           })),
         }
       }
-      if (!/\.tsv$/iu.test(file.name)) throw new Error('请选择 JSON 或 TSV 文件')
+      if (/\.md$/iu.test(file.name)) return readMarkdownQuestionnaire(text, file.name)
+      if (!/\.tsv$/iu.test(file.name)) throw new Error('请选择 Markdown、JSON 或 TSV 文件')
       const lines = text.split(/\r?\n/u).filter(line => line.trim())
       if (lines[0]?.trim() !== '题干\t题型\t选项') throw new Error('TSV 表头须为「题干、题型、选项」三列')
       const questions = lines.slice(1).map((line, index) => {
@@ -842,12 +892,6 @@ window.__ModuleLoader__.load({
 
       function chooseQuestionnaire(id) {
         setQuestionnaireMenu(false)
-        if (id === importQuestionnaireOption) {
-          setImportFile(null)
-          setImportError('')
-          setImportOpen(true)
-          return
-        }
         if (id !== createOption) {
           if (id !== (questionnaireId || normalOption)) openQuestionnaire(id === normalOption ? '' : id)
           return
@@ -858,6 +902,12 @@ window.__ModuleLoader__.load({
         setQuestions([{ id: crypto.randomUUID(), text: '', options: ['', ''] }])
         setNotice('')
         setError('')
+      }
+
+      function showQuestionnaireImport() {
+        setImportFile(null)
+        setImportError('')
+        setImportOpen(true)
       }
 
       async function importQuestionnaire() {
@@ -916,7 +966,6 @@ window.__ModuleLoader__.load({
                     items: [
                       { id: normalOption, label: '当前草稿' },
                       { id: createOption, label: '新建空白问卷', icon: h(IconPlusOutlineRegular, { size: 16, 'aria-hidden': true }) },
-                      { id: importQuestionnaireOption, label: '导入问卷' },
                       ...questionnaires.items.map(item => ({ id: item.id, label: item.title + ' · ' + item.count + ' 题' })),
                     ],
                     anchor: h(Button, {
@@ -926,6 +975,7 @@ window.__ModuleLoader__.load({
                     }, h('span', { style: { ...labelStyle, maxWidth: '14em' } }, questionnaireLabel),
                     h(IconChevronDownOutlineRegular, { size: 14, 'aria-hidden': true })),
                   })),
+                action('导入问卷', showQuestionnaireImport, busy),
                 action(questionnaireId ? '保存修改' : '保存问卷', () => saveQuestionnaire(questionnaireId), busy),
                 questionnaireId && action('另存为新问卷', () => saveQuestionnaire(''), busy),
                 questionnaireId && action('删除问卷', () => {
@@ -995,9 +1045,16 @@ window.__ModuleLoader__.load({
               action('取消', () => setImportOpen(false), busy),
               h(Button, { type: 'button', variant: 'primary', disabled: !importFile || busy, onClick: importQuestionnaire }, '导入到新草稿')),
           }, h('div', { style: { display: 'grid', gap: 12 } },
-            h('p', null, 'JSON 支持问卷名称、公共材料和题目。TSV 使用「题干、题型、选项」三列，单选题选项用 | 分隔，开放题的选项留空。'),
+            h('p', null, '支持 Markdown（.md）、JSON 和 TSV。'),
+            h('details', null, h('summary', null, 'Markdown 格式示例'),
+              h('pre', { style: { whiteSpace: 'pre-wrap' } }, [
+                '# 医患用药沟通调查', '', '## 公共材料', '这是虚构的门诊沟通场景。', '',
+                '## 题目', '### 1. 用药说明是否清楚？', '- 清楚', '- 有疑问', '',
+                '### 2. 还有哪些疑问？',
+              ].join('\n'))),
+            h('p', null, 'TSV 使用「题干、题型、选项」三列，单选题选项用 | 分隔。开放题留空。'),
             h('p', null, '导入会替换当前编辑区，保存后可在问卷列表找到。'),
-            field('问卷文件', h('input', { type: 'file', accept: '.json,.tsv', disabled: busy,
+            field('问卷文件', h('input', { type: 'file', accept: '.md,.json,.tsv', disabled: busy,
               onChange: event => { setImportFile(event.target.files[0] ?? null); setImportError('') } })),
             errorMessage(importError))),
         ),
