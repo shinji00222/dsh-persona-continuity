@@ -99,6 +99,8 @@ test('listSessionsForImport and readConversationChunks filter unsupported sessio
           { type: 'user/message', data: { source: { kind: 'user' }, content: '记住我们用 Node 22' } },
           { type: 'assistant/message', data: { interrupted: true, message: { content: 'half' } } },
           { type: 'assistant/message', data: { message: { content: '好的，Node 22。' } } },
+          { type: 'user/message', data: { source: { kind: 'user' }, content: [{ type: 'image', source: { type: 'base64', data: 'abc' } }] } },
+          { type: 'assistant/message', data: { message: { content: '图里是报错 EADDRINUSE。' } } },
         ],
       }
     },
@@ -114,6 +116,6 @@ test('listSessionsForImport and readConversationChunks filter unsupported sessio
   assert.equal(disposed, true)
   assert.equal(read.workspace, 'w')
   assert.equal(read.chunks.length, 1)
-  assert.equal(read.chunks[0].user, '记住我们用 Node 22')
-  assert.equal(read.chunks[0].assistant, '好的，Node 22。')
+  assert.equal(read.chunks[0].user, '记住我们用 Node 22\n\n[图片附件]')
+  assert.equal(read.chunks[0].assistant, '好的，Node 22。\n\n图里是报错 EADDRINUSE。')
 })

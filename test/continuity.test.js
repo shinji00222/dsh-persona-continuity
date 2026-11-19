@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { test } from 'node:test'
 import { Store, clean } from '../lib/store.js'
-import { extract } from '../lib/extract.js'
+import { extract, rememberableInput, textBlocks } from '../lib/extract.js'
 
 const make = (tag, detail = tag + ' 第 29 行') => ({
   kind: 'progress', topic: tag, title: tag + ' 项目', summary: tag + ' 继续学习', detail,
@@ -116,6 +116,17 @@ test('retains useful text and filters credentials before extraction', () => {
   const input = clean('记住我的偏好，api_key=abcdefghijk，ghp_abcDefghijKLMN', 256)
   assert.match(input, /记住我的偏好/)
   assert.doesNotMatch(input, /abcdefghijk|ghp_/)
+})
+
+test('textBlocks replaces image blocks with placeholder so image-only turns remain rememberable', () => {
+  const userText = textBlocks([{ type: 'image', url: 'data:image/png;base64,xxx' }])
+  assert.equal(userText, '[图片附件]')
+  const packed = rememberableInput(userText, '截图里显示端口 3000 被占用了。')
+  assert.ok(packed)
+  assert.deepEqual(JSON.parse(packed), {
+    user: '[图片附件]',
+    assistant: '截图里显示端口 3000 被占用了。',
+  })
 })
 
 test('extraction accepts structured replies and rejects partial finishes', async () => {
