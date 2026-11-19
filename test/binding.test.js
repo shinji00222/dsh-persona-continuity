@@ -43,6 +43,24 @@ function createHarness(t, { sessions, agents, observations = {}, llmResult = '[]
       },
     },
     sessionQuery: {
+      async filterSessions(filters) {
+        const ids = filters.find(item => item.kind === 'id')?.values
+        return Object.values(observations)
+          .filter(obs => !ids || ids.includes(obs.header?.id))
+          .map(obs => ({ header: obs.header }))
+      },
+      async readTitleSnapshots(ids) {
+        return ids.map(id => ({
+          status: 'fulfilled',
+          value: { session: observations[id]?.header, title: { title: '' } },
+        }))
+      },
+      async filterEvents(id, filters) {
+        const needle = filters.find(item => item.kind === 'text')?.text?.toLowerCase() ?? ''
+        const obs = observations[id]
+        if (!obs) return []
+        return obs.events.filter(event => JSON.stringify(event).toLowerCase().includes(needle))
+      },
       async observeSession(id) {
         const obs = observations[id]
         if (!obs) throw new Error('not found')
@@ -299,7 +317,7 @@ test('systemPrompt.context reads cached recall per turn instead of querying Stor
   const pA = (await callRoute('POST', '/persona', { id: '', name: 'A', instructions: '' })).json.id
   await callRoute('POST', '/bind', { session: 'chat', persona: pA })
 
-  assert.equal(contextProvider(), '')
+  assert.match(contextProvider(), /persona_recall/)
   assert.equal(recallCount, 0)
 
   await emit('session/event', sChat, { type: 'turn/start', data: { turn: 1 } })
@@ -637,4 +655,100 @@ test('failed extraction jobs are retained after 3 attempts and can be retried vi
   const list = (await callRoute('GET', `/index?persona=${pA}&q=`)).json
   assert.equal(list.length, 1)
   assert.equal(list[0].topic, 'retry-job')
+})
+
+test('persona_recall tool and memory catalog enforce strict bound-session isolation', async t => {
+  const sChat = makeSession('chat', [])
+  let registeredTool = null
+  let contextProvider = null
+  const agent = {
+    ...makeAgent('chat', sChat),
+    ctx: {
+      systemPrompt: {
+        section: () => () => {},
+        context: opts => {
+          contextProvider = opts.text
+          return () => {}
+        },
+      },
+      tools: {
+        register(tool) {
+          registeredTool = tool
+          return () => { registeredTool = null }
+        },
+      },
+    },
+  }
+  const sessions = new Map([['chat', sChat]])
+  const agents = new Map([['chat', agent]])
+  const observations = {
+    boundOld: {
+      header: { id: 'boundOld', cwd: 'ws', createdAt: 50 },
+      events: [
+        { type: 'user/message', seq: 1, data: { source: { kind: 'user' }, content: '看下这个 strcmp 代码' } },
+        { type: 'assistant/message', seq: 2, data: { message: { content: '这是 strcmp 的实现对比' } } },
+      ],
+    },
+    unboundNormal: {
+      header: { id: 'unboundNormal', cwd: 'ws', createdAt: 60 },
+      events: [
+        { type: 'user/message', seq: 1, data: { source: { kind: 'user' }, content: '未绑定普通会话里的 strcmp' } },
+        { type: 'assistant/message', seq: 2, data: { message: { content: '不应该被读取' } } },
+      ],
+    },
+  }
+  const { callRoute } = createHarness(t, { sessions, agents, observations })
+  const pA = (await callRoute('POST', '/persona', { id: '', name: 'A', instructions: '' })).json.id
+  const pB = (await callRoute('POST', '/persona', { id: '', name: 'B', instructions: '' })).json.id
+  await callRoute('POST', '/bind', { session: 'chat', persona: pA })
+  assert.ok(registeredTool, 'persona_recall tool should be registered for bound session')
+  assert.equal(registeredTool.name, 'persona_recall')
+
+  const dbPath = join(process.env.DSH_HOME, 'persona-continuity', 'memory.sqlite')
+  const store = new Store(dbPath)
+  store.bind('boundOld', pA)
+  store.saveExtractedMemories({
+    persona: pA, session: 'boundOld', turn: 1, workspace: 'ws', created: Date.now(),
+    items: [{
+      kind: 'lesson', topic: 'c-strcmp', title: 'C 语言 strcmp 练习',
+      summary: '比较字符串返回值符号', detail: 'strcmp 相等返回 0，小于返回负数',
+    }],
+  })
+  store.saveExtractedMemories({
+    persona: pB, session: 'other', turn: 1, workspace: 'ws', created: Date.now(),
+    items: [{
+      kind: 'lesson', topic: 'b-secret', title: 'B 的记忆',
+      summary: '不该被 A 读到', detail: 'B 私有细节',
+    }],
+  })
+  const memA = store.search(pA, 'ws', 'strcmp')[0]
+  const memB = store.search(pB, 'ws', 'B')[0]
+  store.close()
+
+  // 1. 常驻记忆目录应包含 pA 的记忆标题，且禁止读取 ~/.dsh/sessions
+  const promptText = contextProvider()
+  assert.match(promptText, /记忆目录：/)
+  assert.match(promptText, /C 语言 strcmp 练习/)
+  assert.match(promptText, /~\/\.dsh\/sessions\//)
+
+  // 2. 按 memory_id 读取本人的记忆成功，读其他人格记忆被拒绝
+  const hitA = await registeredTool.execute({ memory_id: memA.id }, { agent })
+  assert.equal(hitA.found, true)
+  assert.equal(hitA.memory.detail, 'strcmp 相等返回 0，小于返回负数')
+  const missB = await registeredTool.execute({ memory_id: memB.id }, { agent })
+  assert.equal(missB.found, false)
+
+  // 3. 按 session_id 读未绑定普通会话应严格返回 not-found（边界 1）
+  const deniedUnbound = await registeredTool.execute({ session_id: 'unboundNormal' }, { agent })
+  assert.equal(deniedUnbound.status, 'not-found')
+  const allowedBound = await registeredTool.execute({ session_id: 'boundOld' }, { agent })
+  assert.equal(allowedBound.status, 'found')
+  assert.match(allowedBound.excerpts[0].text, /strcmp/)
+
+  // 4. 按 query 搜索应同时命中记忆库与已绑定旧对话，不泄露未绑定普通会话
+  const searched = await registeredTool.execute({ query: 'strcmp' }, { agent })
+  assert.equal(searched.memories.length, 1)
+  assert.equal(searched.memories[0].id, memA.id)
+  assert.equal(searched.history.status, 'found')
+  assert.equal(searched.history.source.id, 'boundOld')
 })

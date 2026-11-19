@@ -100,4 +100,5 @@
 - 人格设定修改后通过 `refreshBinding` 在下一轮 `turn/start` 刷新绑定快照；schema 升级至 v4（移除未使用的 `candidates`，新增 `imported_chunks` 与 `source` 字段），旧对话导入改为后台优先队列并按块 sha256 去重（注：hash 去重只防同一块重复导入，不处理与自动提炼的内容重叠）。
 - 后台提炼失败满 3 次不再静默删除，改为在 `jobs` 保留失败状态（不破坏 schema v4），通过 `/history/import/status` 与设置页 `MemoryPanel` 展示失败数并提供「重试失败项」（`POST /jobs/retry`）。
 - 前端 `Picker` 在未锁定时监听发送与指针悬停预刷新状态，点击打开菜单前先校验最新绑定状态，避免新会话第一轮聊完后闪出菜单。
+- 新增 Codex 风格的常驻轻量记忆目录（`Store.catalog`）与受控检索工具 `persona_recall`（严格限定当前人格已绑定且同工作区的记忆与历史会话），并禁止模型直接读取 `~/.dsh/sessions/` 原始日志。
 - 召回改为数字缺失软惩罚、统一工作区隔离（含「继续上次」）并在 `agent/pre-step` 单轮缓存结果；扫描上限提至 `LIMIT = 5000`（当前仍为线性扫描，后续记忆量再大时需换 FTS5 trigram）。
