@@ -46,6 +46,8 @@ window.__ModuleLoader__.load({
         queuedPrefix: '已排队 ', queuedMid: ' 段，跳过重复 ', queuedSuffix: ' 段',
         importDone: '记忆提炼完成', currentPersona: '当前人格', boundPrefix: '已绑定：',
         importedTurn: '导入',
+        failedJobsPrefix: '有 ', failedJobsSuffix: ' 条记忆后台提炼失败',
+        retryFailed: '重试失败项', retriedPrefix: '已重新排队 ', retriedSuffix: ' 条失败任务',
       },
       en: {
         title: 'Persona Continuity', normal: 'Standard chat', persona: 'Persona', new: 'New persona', name: 'Name',
@@ -68,6 +70,8 @@ window.__ModuleLoader__.load({
         queuedPrefix: 'Queued ', queuedMid: ' chunks, skipped ', queuedSuffix: ' duplicates',
         importDone: 'Memory extraction complete', currentPersona: 'Current persona', boundPrefix: 'Bound to: ',
         importedTurn: 'Imported',
+        failedJobsPrefix: '', failedJobsSuffix: ' background memory extraction(s) failed',
+        retryFailed: 'Retry failed', retriedPrefix: 'Re-queued ', retriedSuffix: ' failed job(s)',
       },
     }
 
@@ -127,6 +131,49 @@ window.__ModuleLoader__.load({
           window.removeEventListener(changedEvent, refresh)
         }
       }, [sessionId])
+
+      const locked = Boolean(state?.locked)
+      useEffect(() => {
+        if (!sessionId || !state || locked) return
+        let live = true
+        const timers = new Set()
+        const refresh = () => {
+          if (!live) return
+          call(statePath(sessionId)).then(
+            value => { if (live) setState(value) },
+            () => {},
+          )
+        }
+        const scheduleRefresh = () => {
+          for (const delay of [250, 1200]) {
+            const id = setTimeout(() => {
+              timers.delete(id)
+              refresh()
+            }, delay)
+            timers.add(id)
+          }
+        }
+        const onKeyDown = event => {
+          if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) scheduleRefresh()
+        }
+        const onClick = event => {
+          if (!(event.target instanceof Element)) return
+          if (event.target.closest('[data-persona-picker]')) return
+          if (event.target.closest('button, [type="submit"]')) scheduleRefresh()
+        }
+        document.addEventListener('keydown', onKeyDown, true)
+        document.addEventListener('click', onClick, true)
+        const interval = setInterval(() => {
+          if (!document.hidden) refresh()
+        }, 3000)
+        return () => {
+          live = false
+          document.removeEventListener('keydown', onKeyDown, true)
+          document.removeEventListener('click', onClick, true)
+          clearInterval(interval)
+          for (const id of timers) clearTimeout(id)
+        }
+      }, [sessionId, Boolean(state), locked])
 
       if (!sessionId || !state) return errorMessage(error)
 
@@ -265,13 +312,27 @@ window.__ModuleLoader__.load({
             disabled: pending,
             'aria-disabled': !canOpen,
             'data-persona-picker': '',
-            onClick: () => {
-              if (!canOpen) return
-              setError('')
-              if (mode !== 'menu') {
-                void call(statePath(sessionId)).then(setState, () => {})
+            onPointerEnter: () => {
+              if (state.locked || pending) return
+              void call(statePath(sessionId)).then(setState, () => {})
+            },
+            onClick: async () => {
+              if (mode === 'menu') {
+                setMode(null)
+                return
               }
-              setMode(mode === 'menu' ? null : 'menu')
+              if (!canOpen || pending) return
+              setError('')
+              setPending(true)
+              try {
+                const latest = await call(statePath(sessionId))
+                setState(latest)
+                if (latest.editable || latest.bindOnce) setMode('menu')
+              } catch (failure) {
+                setError(failure.message)
+              } finally {
+                setPending(false)
+              }
             },
           },
           h('span', { style: labelStyle, 'data-persona-id': selected?.id }, label),
@@ -467,6 +528,8 @@ window.__ModuleLoader__.load({
       const [importOpen, setImportOpen] = useState(false)
       const [notice, setNotice] = useState('')
       const [polling, setPolling] = useState(false)
+      const [failedCount, setFailedCount] = useState(0)
+      const [retrying, setRetrying] = useState(false)
       const persona = '?persona=' + encodeURIComponent(id)
 
       useImportPoll(id, polling, () => {
@@ -475,6 +538,19 @@ window.__ModuleLoader__.load({
         setRevision(current => current + 1)
         window.dispatchEvent(new Event(changedEvent))
       })
+
+      useEffect(() => {
+        let live = true
+        call('/history/import/status' + persona).then(
+          status => {
+            if (!live) return
+            setFailedCount(status.failed ?? 0)
+            if (status.pending > 0) setPolling(true)
+          },
+          () => {},
+        )
+        return () => { live = false }
+      }, [persona, revision])
 
       useEffect(() => {
         let live = true
@@ -491,10 +567,33 @@ window.__ModuleLoader__.load({
         setRevision(current => current + 1)
       }
 
+      async function retryFailedJobs() {
+        if (retrying) return
+        setRetrying(true)
+        setError('')
+        try {
+          const result = await call('/jobs/retry', { persona: id })
+          setFailedCount(result.failed ?? 0)
+          setNotice(t('retriedPrefix') + (result.retried ?? 0) + t('retriedSuffix'))
+          if ((result.retried ?? 0) > 0 || (result.pending ?? 0) > 0) setPolling(true)
+          setRevision(current => current + 1)
+        } catch (failure) {
+          setError(failure.message)
+        } finally {
+          setRetrying(false)
+        }
+      }
+
       return h('div', { style: panelStyle },
         h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' } },
           h('h3', { style: { margin: 0 } }, t('index')),
           h(Button, { type: 'button', size: 'sm', variant: 'outline', onClick: () => setImportOpen(true) }, t('importHistory'))),
+        failedCount > 0 && h('div', {
+          role: 'status',
+          style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', fontSize: 13 },
+        },
+        h('span', null, t('failedJobsPrefix') + failedCount + t('failedJobsSuffix')),
+        h(Button, { type: 'button', size: 'sm', variant: 'outline', disabled: retrying, onClick: retryFailedJobs }, t('retryFailed'))),
         notice && h('p', { style: { margin: 0, fontSize: 13 } }, notice),
         h(Input, {
           type: 'search', 'aria-label': t('search'), placeholder: t('search'), value: query, maxLength: 300,

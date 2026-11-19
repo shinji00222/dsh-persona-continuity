@@ -5,7 +5,9 @@ import { Store } from './lib/store.js'
 import { extract, rememberableInput, textBlocks } from './lib/extract.js'
 import { registerWeb } from './lib/web.js'
 import { createSimulation } from './lib/simulation.js'
-import { chunksFromEvents, historyRequest, listSessionsForImport, readConversationChunks, retrieveHistory } from './lib/history.js'
+import {
+  chunksFromEvents, historyRequest, listSessionsForImport, modelFromEvents, readConversationChunks, retrieveHistory,
+} from './lib/history.js'
 
 export const name = 'persona-continuity'
 export const inject = ['agents', 'sessions', 'systemPrompt', 'llm', 'connection', 'sessionQuery']
@@ -42,16 +44,19 @@ export function apply(ctx) {
   let draining = false
   let lastModel = null
 
-  function modelForSession(id) {
-    if (!id) return null
-    const session = ctx.sessions.get(id)
-    const agent = ctx.agents.get(id)
-    const target = session?.requestHeader?.()?.config ?? agent?.options
+  function rememberModel(target) {
     if (target?.provider && target?.model) {
       lastModel = { provider: target.provider, model: target.model }
       return lastModel
     }
     return null
+  }
+
+  function modelForSession(id) {
+    if (!id) return null
+    const session = ctx.sessions.get(id)
+    const agent = ctx.agents.get(id)
+    return rememberModel(session?.requestHeader?.()?.config ?? agent?.options)
   }
 
   function resolveModel(preferredSessionId) {
@@ -138,16 +143,20 @@ export function apply(ctx) {
     const live = ctx.sessions.get(id)
     if (live) {
       const events = live.snapshotEvents?.() ?? []
+      const config = live.requestHeader?.()?.config
       return {
         supported: supported(live),
         hasHistory: hasHistoryEvents(events),
         hasActiveTurn: hasActiveTurnEvents(events),
         workspace: live.header?.cwd ?? '',
+        model: config?.provider && config?.model
+          ? { provider: config.provider, model: config.model }
+          : modelFromEvents(events),
         chunks: () => chunksFromEvents(events, live.header?.inheritedEventCount ?? 0),
       }
     }
     if (String(id).startsWith('session-incognito-')) {
-      return { supported: false, hasHistory: false, hasActiveTurn: false, workspace: '', chunks: () => [] }
+      return { supported: false, hasHistory: false, hasActiveTurn: false, workspace: '', model: null, chunks: () => [] }
     }
     try {
       const signal = AbortSignal.any([lifetime.signal, AbortSignal.timeout(4000)])
@@ -161,13 +170,14 @@ export function apply(ctx) {
           hasHistory: hasHistoryEvents(events),
           hasActiveTurn: hasActiveTurnEvents(events),
           workspace: obs.header?.cwd ?? '',
+          model: modelFromEvents(events),
           chunks: () => chunksFromEvents(events, inherited),
         }
       } finally {
         obs[Symbol.dispose]()
       }
     } catch {
-      return { supported: true, hasHistory: false, hasActiveTurn: false, workspace: '', chunks: () => [] }
+      return { supported: true, hasHistory: false, hasActiveTurn: false, workspace: '', model: null, chunks: () => [] }
     }
   }
 
@@ -225,7 +235,7 @@ export function apply(ctx) {
 
   function enqueueSessionHistory(sessionId, persona, info) {
     if (!info?.hasHistory) return
-    const target = resolveModel(sessionId)
+    const target = rememberModel(resolveModel(sessionId) ?? info.model)
     if (!target) return
     const chunks = info.chunks()
     if (!chunks.length) return
@@ -284,8 +294,7 @@ export function apply(ctx) {
       }
       const ids = [...new Set(Array.isArray(sessions) ? sessions.filter(item => typeof item === 'string' && item) : [])].slice(0, 20)
       if (!ids.length) throw new Error('请选择至少一段旧对话')
-      const target = resolveModel(typeof activeSession === 'string' ? activeSession : '')
-      if (!target) throw new Error('请先打开一个已选好模型的对话，再提炼记忆')
+      const fallbackTarget = resolveModel(typeof activeSession === 'string' ? activeSession : '')
 
       let boundSessions = 0
       let queuedChunks = 0
@@ -312,6 +321,12 @@ export function apply(ctx) {
           skipped.push({ id: sessionId, reason: 'read-failed' })
           continue
         }
+        const sessionTarget = read.chunks.length
+          ? rememberModel(fallbackTarget ?? read.model ?? lastModel)
+          : null
+        if (read.chunks.length && !sessionTarget) {
+          throw new Error('请先打开一个已选好模型的对话，再提炼记忆')
+        }
         if (!existing) {
           store.bind(sessionId, persona)
           if (liveAgent) attach(liveAgent)
@@ -322,7 +337,7 @@ export function apply(ctx) {
           continue
         }
         const counts = queueChunks({
-          persona, sessionId, workspace: read.workspace, target, chunks: read.chunks,
+          persona, sessionId, workspace: read.workspace, target: sessionTarget, chunks: read.chunks,
         })
         queuedChunks += counts.queuedChunks
         duplicateChunks += counts.duplicateChunks
@@ -331,6 +346,12 @@ export function apply(ctx) {
       return { boundSessions, queuedChunks, duplicateChunks, skipped }
     },
     importStatus: persona => store.importProgress(persona),
+    retryFailed(persona = '') {
+      const id = typeof persona === 'string' ? persona : ''
+      const retried = store.retryFailed(id)
+      if (retried > 0) queueMicrotask(drain)
+      return { retried, ...store.importProgress(id) }
+    },
   }
 
   ctx.effect(() => {

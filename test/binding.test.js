@@ -521,3 +521,120 @@ test('cold persisted standard session not yet in ctx.sessions supports bindOnce 
   const list = (await callRoute('GET', `/index?persona=${pA}&q=cold-bind`)).json
   assert.equal(list.length, 1)
 })
+
+test('cold session bind and importHistory fall back to request/header model when no in-memory model exists', async t => {
+  const sessions = new Map()
+  const agents = new Map()
+  const observations = {
+    coldBind: {
+      header: { id: 'coldBind', cwd: 'ws', createdAt: 10 },
+      events: [
+        { type: 'request/header', data: { header: { config: { provider: 'mock-cold', model: 'cold-1' } } } },
+        { type: 'user/message', data: { source: { kind: 'user' }, content: '记住冷启动无内存模型时绑定也能提炼。' } },
+        { type: 'assistant/message', data: { message: { content: '收到，已经记下冷启动无内存模型的对话。' } } },
+      ],
+    },
+    coldImport: {
+      header: { id: 'coldImport', cwd: 'ws', createdAt: 20 },
+      events: [
+        { type: 'request/header', data: { config: { provider: 'mock-import', model: 'import-1' } } },
+        { type: 'user/message', data: { source: { kind: 'user' }, content: '记住冷启动直接导入旧对话也要能从事件提取模型。' } },
+        { type: 'assistant/message', data: { message: { content: '收到，已从事件提取模型。' } } },
+      ],
+    },
+    noModel: {
+      header: { id: 'noModel', cwd: 'ws', createdAt: 30 },
+      events: [
+        { type: 'user/message', data: { source: { kind: 'user' }, content: '这段旧对话没有任何模型配置事件。' } },
+        { type: 'assistant/message', data: { message: { content: '是的，没有模型配置事件。' } } },
+      ],
+    },
+  }
+  const llmResult = JSON.stringify([
+    {
+      kind: 'decision', topic: 'cold-model-bind', title: '冷绑定模型兜底',
+      summary: '无内存模型时从 request/header 兜底',
+      detail: '记住冷启动无内存模型时绑定也能提炼。',
+      evidence: '记住冷启动无内存模型时绑定也能提炼。',
+    },
+    {
+      kind: 'decision', topic: 'cold-model-import', title: '冷导入模型兜底',
+      summary: '直接导入冷会话时从 request/header 兜底',
+      detail: '记住冷启动直接导入旧对话也要能从事件提取模型。',
+      evidence: '记住冷启动直接导入旧对话也要能从事件提取模型。',
+    },
+  ])
+  const { callRoute } = createHarness(t, { sessions, agents, observations, llmResult })
+  const pA = (await callRoute('POST', '/persona', { id: '', name: 'A', instructions: '' })).json.id
+
+  // 先测既无内存模型又无事件模型的旧对话导入：应当报错
+  const missing = await callRoute('POST', '/history/import', { persona: pA, sessions: ['noModel'] })
+  assert.equal(missing.status, 400)
+  assert.match(missing.json.error, /请先打开一个已选好模型的对话/)
+
+  // 再测冷会话直接导入（自身带 request/header）
+  const imported = await callRoute('POST', '/history/import', { persona: pA, sessions: ['coldImport'] })
+  assert.equal(imported.status, 200)
+  assert.equal(imported.json.queuedChunks, 1)
+
+  // 再测冷会话绑定（自身带 request/header）
+  await callRoute('POST', '/bind', { session: 'coldBind', persona: pA })
+  await new Promise(resolve => setTimeout(resolve, 40))
+
+  const memories = (await callRoute('GET', `/index?persona=${pA}&q=`)).json
+  assert.equal(memories.length, 2)
+})
+
+test('failed extraction jobs are retained after 3 attempts and can be retried via /jobs/retry', async t => {
+  const sessions = new Map([['host', makeSession('host')]])
+  const agents = new Map([['host', makeAgent('host', sessions.get('host'))]])
+  const observations = {
+    s1: {
+      header: { id: 's1', cwd: 'ws', createdAt: 10 },
+      events: [
+        { type: 'user/message', data: { source: { kind: 'user' }, content: '记住失败重试后仍应保存这条决定。' } },
+        { type: 'assistant/message', data: { message: { content: '好的，会保留并支持重试。' } } },
+      ],
+    },
+  }
+  const { callRoute } = createHarness(t, {
+    sessions, agents, observations,
+    llmResult: JSON.stringify([{
+      kind: 'decision', topic: 'retry-job', title: '失败重试',
+      summary: '失败三次后可重试',
+      detail: '记住失败重试后仍应保存这条决定。',
+      evidence: '记住失败重试后仍应保存这条决定。',
+    }]),
+  })
+  const pA = (await callRoute('POST', '/persona', { id: '', name: 'A', instructions: '' })).json.id
+  const dbPath = join(process.env.DSH_HOME, 'persona-continuity', 'memory.sqlite')
+  const store = new Store(dbPath)
+  store.bind('s1', pA)
+  store.enqueue({
+    session: 's1', turn: -1, persona: pA, workspace: 'ws', provider: 'mock', model: 'm1',
+    input: JSON.stringify({ user: '记住失败重试后仍应保存这条决定。', assistant: '好的，会保留并支持重试。' }),
+    source: 'import', chunk_hash: 'h-retry',
+  })
+  // 模拟连续失败 3 次（attempt 0 -> 1 -> 2 -> 3）
+  for (let i = 0; i < 3; i++) {
+    const job = store.nextJob()
+    assert.ok(job)
+    store.fail(job)
+    if (i < 2) store.db.prepare('UPDATE jobs SET available = 0 WHERE session = ? AND turn = ?').run(job.session, job.turn)
+  }
+  assert.equal(store.nextJob(), undefined)
+  store.close()
+
+  const statusBefore = (await callRoute('GET', `/history/import/status?persona=${pA}`)).json
+  assert.deepEqual(statusBefore, { pending: 0, failed: 1 })
+
+  const retried = (await callRoute('POST', '/jobs/retry', { persona: pA })).json
+  assert.equal(retried.retried, 1)
+  await new Promise(resolve => setTimeout(resolve, 40))
+
+  const statusAfter = (await callRoute('GET', `/history/import/status?persona=${pA}`)).json
+  assert.deepEqual(statusAfter, { pending: 0, failed: 0 })
+  const list = (await callRoute('GET', `/index?persona=${pA}&q=`)).json
+  assert.equal(list.length, 1)
+  assert.equal(list[0].topic, 'retry-job')
+})
