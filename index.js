@@ -5,7 +5,6 @@ import { join } from 'node:path'
 import { Store } from './lib/store.js'
 import { extract, rememberableInput, reviewMemories, textBlocks } from './lib/extract.js'
 import { registerWeb } from './lib/web.js'
-import { createSimulation } from './lib/simulation.js'
 import {
   chunksFromEvents, historyRequest, listSessionsForImport, modelFromEvents, readConversationChunks,
   recentMemorySources, retrieveHistory,
@@ -39,14 +38,12 @@ function hasHistoryEvents(events) {
 export function apply(ctx) {
   const root = process.env.DSH_HOME?.trim() || join(homedir(), '.dsh')
   const currentDb = join(root, name, 'memory.sqlite')
-  const previousName = name === 'persona-continuity' ? 'persona-memory-sim' : 'persona-continuity'
-  const previousDb = join(root, previousName, 'memory.sqlite')
+  const previousDb = join(root, 'persona-memory-sim', 'memory.sqlite')
   const store = new Store(!existsSync(currentDb) && existsSync(previousDb) ? previousDb : currentDb)
   const attached = new Map()
   const turns = new Map()
   const reviews = new Set()
   const lifetime = new AbortController()
-  const simulation = createSimulation(store, ctx.llm, lifetime.signal)
   let draining = false
   let lastModel = null
 
@@ -210,6 +207,59 @@ export function apply(ctx) {
     })().catch(() => {
       if (!lifetime.signal.aborted) ctx.logger.warn('persona-continuity: background memory queue failed')
     }).finally(() => { draining = false })
+  }
+
+  function applyReviewedChanges(personaId, changes, started) {
+    let updated = 0
+    for (const { note, source, evidence, title, summary, detail } of changes) {
+      if (store.personaFor(source.session)?.id !== personaId) continue
+      updated += store.saveExtractedMemories({
+        persona: personaId, session: source.session, turn: source.turn, workspace: note.workspace,
+        created: started, source: 'review', items: [{
+          kind: note.kind, topic: note.topic, title, summary, detail, evidence, expectedRevision: note.revision,
+        }],
+      })
+    }
+    return updated
+  }
+
+  async function drainReview() {
+    if (draining || reviews.size || lifetime.signal.aborted) return
+    const batch = store.nextReview(new Set([...turns.values()].map(turn => turn.persona)))
+    if (!batch) return
+    const { persona: id, workspace } = batch
+    reviews.add(id)
+    try {
+      const sources = batch.sources.filter(source => store.personaFor(source.session)?.id === id)
+      const selected = store.coreIds(id, workspace)
+      const notes = store.rows(id, workspace)
+      const existingCore = selected.map(noteId => notes.find(note => note.id === noteId)).filter(Boolean)
+      const candidates = [...new Set([...existingCore, ...notes])].slice(0, 12)
+      const source = sources.at(-1)
+      if (!source || !candidates.length) {
+        store.finishReview(batch, () => {})
+        return
+      }
+      const started = Date.now()
+      const signal = AbortSignal.any([lifetime.signal, AbortSignal.timeout(45000)])
+      const plan = await reviewMemories(ctx.llm, {
+        target: { model: source.model, provider: source.provider }, sessionId: source.session,
+        persona: store.persona(id), notes: candidates, sources: sources.map(({ session, turn, createdAt, text }) =>
+          ({ session, turn, createdAt, text })), consolidate: true,
+      }, signal)
+      signal.throwIfAborted()
+      store.finishReview(batch, () => {
+        applyReviewedChanges(id, plan.changes, started)
+        const merged = plan.duplicates.filter(({ keep, drop }) => store.mergeDuplicate(id, keep, drop))
+        if (plan.core || merged.length) {
+          const reassigned = (plan.core ?? selected).map(noteId =>
+            merged.find(({ drop }) => drop.id === noteId)?.keep.id ?? noteId)
+          store.saveCore(id, workspace, [...new Set(reassigned)].filter(noteId => store.detail(id, noteId, workspace)))
+        }
+      })
+    } finally {
+      reviews.delete(id)
+    }
   }
 
   async function inspectSession(id) {
@@ -385,18 +435,7 @@ export function apply(ctx) {
         signal.throwIfAborted()
         return { updated: store.transaction(() => {
           if (!store.autoMemory(personaId) || store.personaFor(sessionId)?.id !== personaId) return 0
-          let updated = 0
-          for (const change of changes) {
-            const { note, source, evidence, title, summary, detail } = change
-            if (store.personaFor(source.session)?.id !== personaId) continue
-            updated += store.saveExtractedMemories({
-              persona: personaId, session: source.session, turn: source.turn, workspace: note.workspace,
-              created: started, source: 'review', items: [{
-                kind: note.kind, topic: note.topic, title, summary, detail, evidence, expectedRevision: note.revision,
-              }],
-            })
-          }
-          return updated
+          return applyReviewedChanges(personaId, changes, started)
         }) }
       } finally {
         reviews.delete(personaId)
@@ -474,7 +513,13 @@ export function apply(ctx) {
   }
 
   ctx.effect(() => {
-    const poll = () => { drain(); simulation.drain() }
+    const poll = () => {
+      // Regular turn jobs take priority over consolidation.
+      void drainReview().catch(() => {
+        if (!lifetime.signal.aborted) ctx.logger.warn('persona-continuity: memory review deferred after failure')
+      })
+      drain()
+    }
     const timer = setInterval(poll, 5000)
     timer.unref()
     poll()
@@ -485,7 +530,7 @@ export function apply(ctx) {
       store.close()
     }
   })
-  ctx.effect(() => registerWeb(ctx.connection, api, simulation))
+  ctx.effect(() => registerWeb(ctx.connection, api))
 
   ctx.on('agent/created', ({ agent }) => { modelForSession(String(agent.id)); attach(agent) })
   ctx.on('agent/disposed', ({ agent }) => {

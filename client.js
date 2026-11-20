@@ -3,13 +3,18 @@ window.__ModuleLoader__.load({
   factory(require) {
     const React = require('react')
     const { createElement: h, useEffect, useId, useState } = React
-    const { Button, Menu, Modal, Input, IconChevronDownOutlineRegular, IconPlusOutlineRegular, IconListPenOutlineRegular } =
-      require('@deepseek-ai/dsh-client-ui-primitives')
+    const {
+      Button, Menu, Modal, Input, Switch, Tag,
+      IconChevronDownOutline14, IconChevronLeftOutline14, IconPlusOutline16,
+      IconSearchOutline16, IconEditOutline16, IconTrashOutline16,
+      IconLinkOutline14, IconRefreshOutline16, IconClockOutline16,
+      IconCheckOutline16, IconUserOutline16,
+    } = require('@deepseek-ai/dsh-client-ui-primitives')
+
     const base = '/api/persona-continuity'
     const changedEvent = 'persona-continuity:changed'
     const normalOption = '__normal__'
     const createOption = '__create__'
-    const simulationPanel = 'persona-continuity-simulation'
 
     async function call(path, data) {
       const headers = {}
@@ -21,72 +26,237 @@ window.__ModuleLoader__.load({
       }
       const response = await fetch(base + path, options)
       const result = await response.json().catch(() => null)
-      if (!response.ok || result === null) throw new Error(result?.error || '无法读取人格记忆')
+      if (!response.ok || result === null) {
+        const error = new Error(result?.error || 'Request failed')
+        error.status = response.status
+        throw error
+      }
       return result
+    }
+
+    const css = `
+.dpm_root{display:grid;gap:16px;width:100%;max-width:680px;color:var(--dsw-alias-label-primary);font-size:14px;line-height:22px}
+.dpm_toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding-bottom:14px;border-bottom:0.5px solid var(--dsw-alias-border-l2)}
+.dpm_toolbarLeft{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0;flex:1 1 220px}
+.dpm_toolbarRight{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dpm_selectorBtn{display:inline-flex;align-items:center;gap:6px;height:36px;max-width:100%;padding:0 14px;border-radius:18px;border:none;background:var(--dsw-alias-bg-module-platform);color:var(--dsw-alias-label-primary);font:inherit;font-size:14px;font-weight:500;cursor:pointer;min-width:0}
+.dpm_selectorBtn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}
+.dpm_selectorBtn:disabled{opacity:0.55;cursor:not-allowed}
+.dpm_selectorText{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.dpm_card{display:grid;gap:14px;padding:16px;border-radius:16px;border:0.5px solid var(--dsw-alias-border-l4);background:var(--dsw-alias-bg-layer-3);min-width:0}
+.dpm_cardHeader{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;min-width:0}
+.dpm_cardTitle{margin:0;font-size:15px;font-weight:500;line-height:22px;color:var(--dsw-alias-label-primary)}
+.dpm_field{display:grid;gap:6px;min-width:0}
+.dpm_label{font-size:13px;font-weight:500;line-height:20px;color:var(--dsw-alias-label-primary)}
+.dpm_hint{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary);margin:0}
+.dpm_textarea{box-sizing:border-box;width:100%;min-height:88px;padding:8px 12px;border-radius:8px;border:0.5px solid var(--dsw-alias-border-l4);background:var(--dsw-specific-input-major, var(--dsw-alias-bg-layer-1));color:var(--dsw-alias-label-primary);font-family:inherit;font-size:13px;line-height:20px;resize:vertical;outline:none}
+.dpm_textarea:focus{border-color:var(--dsw-alias-state-business-primary)}
+.dpm_textarea:disabled{opacity:0.6;cursor:not-allowed}
+.dpm_settingRow{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 0 4px;border-top:0.5px solid var(--dsw-alias-border-l2)}
+.dpm_settingInfo{display:grid;gap:2px;min-width:0;flex:1}
+.dpm_actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dpm_statusText{font-size:12px;line-height:18px;color:var(--dsw-alias-state-success-primary);display:inline-flex;align-items:center;gap:4px}
+.dpm_error{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-state-error-primary);overflow-wrap:anywhere}
+.dpm_notice{margin:0;padding:8px 12px;border-radius:10px;font-size:12px;line-height:18px;background:var(--dsw-alias-state-business-tertiary);color:var(--dsw-alias-label-primary)}
+.dpm_warnBanner{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px 12px;border-radius:10px;background:var(--dsw-alias-state-warn-tertiary);color:var(--dsw-alias-state-warn-label);font-size:12px;line-height:18px}
+.dpm_list{display:grid;gap:8px;min-width:0}
+.dpm_item{display:grid;gap:6px;width:100%;text-align:left;padding:12px 14px;border-radius:12px;border:0.5px solid var(--dsw-alias-border-l3);background:var(--dsw-alias-bg-layer-2);color:inherit;font:inherit;cursor:pointer;min-width:0;box-sizing:border-box}
+.dpm_item:hover{background:var(--dsw-alias-interactive-bg-hover);border-color:var(--dsw-alias-border-l4)}
+.dpm_item:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:1px}
+.dpm_itemTop{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;min-width:0}
+.dpm_itemTitle{font-size:14px;font-weight:500;line-height:20px;color:var(--dsw-alias-label-primary);overflow-wrap:anywhere}
+.dpm_itemSummary{font-size:13px;line-height:19px;color:var(--dsw-alias-label-secondary);margin:0;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.dpm_meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary);min-width:0}
+.dpm_mono{font-family:var(--dsw-font-mono, monospace);font-size:11px;overflow-wrap:anywhere}
+.dpm_detailBox{display:grid;gap:12px;padding:14px;border-radius:12px;border:0.5px solid var(--dsw-alias-border-l3);background:var(--dsw-alias-bg-layer-2);min-width:0}
+.dpm_detailBody{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;line-height:21px;color:var(--dsw-alias-label-primary)}
+.dpm_sourceRow{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px 12px;border-radius:10px;background:var(--dsw-alias-bg-module-platform);min-width:0}
+.dpm_empty{margin:0;padding:20px 12px;text-align:center;font-size:13px;color:var(--dsw-alias-label-tertiary);border-radius:12px;border:0.5px dashed var(--dsw-alias-border-l3)}
+.dpm_pickerBtn{max-width:clamp(80px, 16vw, 168px);padding:0 10px;border-radius:18px}
+`
+    const styleId = 'dsh-persona-continuity/styles'
+    if (typeof document !== 'undefined' && document.querySelector('style[data-plugin-css=' + JSON.stringify(styleId) + ']') === null) {
+      const tag = document.createElement('style')
+      tag.dataset.plugin = 'dsh-persona-continuity'
+      tag.dataset.pluginCss = styleId
+      tag.textContent = css
+      document.head.appendChild(tag)
     }
 
     const dictionaries = {
       zh: {
-        title: '人格续忆', normal: '普通会话', persona: '人格', new: '新建人格', name: '名称', instructions: '人格设定',
-        close: '关闭', cancel: '取消', createAndUse: '创建并使用', namePlaceholder: '输入人格名称',
-        rename: '重命名', renamePersona: '重命名人格',
-        save: '保存人格', index: '记忆索引', search: '查找记忆', forget: '删除记忆', confirm: '删除这条长期记忆？',
-        empty: '暂无匹配记忆', source: '来源会话', turn: '轮次',
-        busy: '回复生成期间暂不可切换人格', lockedStarted: '对话开始后不能更换人格',
-        bindOnceTitle: '确认绑定人格', confirmBind: '确认绑定',
+        title: '人格续忆',
+        normal: '普通会话',
+        persona: '人格',
+        selectPersona: '选择人格',
+        new: '新建人格',
+        newPersonaTitle: '新建人格',
+        name: '名称',
+        instructions: '人格设定',
+        instructionsPlaceholder: '描述这个人格的身份、关注重点和记忆偏好…',
+        close: '关闭',
+        cancel: '取消',
+        createAndUse: '创建并使用',
+        namePlaceholder: '输入人格名称',
+        rename: '重命名',
+        renamePersona: '重命名人格',
+        save: '保存人格',
+        saved: '已保存',
+        profileSection: '人格设定',
+        autoMemory: '自动记忆',
+        autoMemoryDesc: '对话结束后由该人格自主提炼或更新长期记忆，关闭后仅保留手动编辑与已有记忆。',
+        index: '长期记忆',
+        memoryCountSuffix: ' 条',
+        search: '搜索记忆标题、摘要或内容…',
+        forget: '删除记忆',
+        confirmTitle: '删除长期记忆',
+        confirm: '确定删除「{title}」？删除后将不再被该人格召回。',
+        empty: '暂无匹配的长期记忆',
+        emptyHint: '在对话中使用该人格，或从旧对话导入记忆。',
+        source: '来源会话',
+        turn: '轮次',
+        turnNumber: '第 {n} 轮',
+        openSource: '查看来源',
+        sourceModalTitle: '记忆来源',
+        sourceNotConnected: '来源原文跳转与读取接口尚未接入宿主，以下为记录的来源元信息：',
+        sourceTurnFallback: '暂未获取到该轮次原文内容。',
+        backToList: '返回列表',
+        scopeLabel: '项目范围',
+        updatedAtLabel: '更新于',
+        revisionPrefix: 'v',
+        busy: '回复生成期间暂不可切换人格',
+        lockedStarted: '对话开始后不能更换人格',
+        bindOnceTitle: '确认绑定人格',
+        confirmBind: '确认绑定',
         bindOnceConfirm: '绑定后本对话不能再更换人格，之前的对话内容会归入该人格。确定？',
         cannotImportBound: '（不可导入）',
-        edit: '编辑', saveMemory: '保存记忆',
-        memoryTitle: '标题', summary: '摘要', detail: '详情', loading: '加载中…',
-        importHistory: '从旧对话导入记忆',
-        importHistoryTitle: '选择旧对话加入记忆', importAction: '绑定并提炼记忆',
-        importing: '提炼中…', filterChats: '筛选旧对话标题', noChats: '暂无可导入的旧对话',
+        edit: '编辑',
+        saveMemory: '保存记忆',
+        memoryTitle: '标题',
+        summary: '摘要',
+        detail: '详情',
+        loading: '加载中…',
+        importHistory: '从旧对话导入',
+        importHistoryTitle: '选择旧对话加入记忆',
+        importAction: '绑定并提炼记忆',
+        importing: '提炼中…',
+        filterChats: '筛选旧对话标题',
+        noChats: '暂无可导入的旧对话',
         unbound: '未绑定',
         instructionsHint: '修改后，已绑定的会话从下一轮起生效',
-        queuedPrefix: '已排队 ', queuedMid: ' 段，跳过重复 ', queuedSuffix: ' 段',
-        importDone: '记忆提炼完成', currentPersona: '当前人格', boundPrefix: '已绑定：',
+        queuedPrefix: '已排队 ',
+        queuedMid: ' 段，跳过重复 ',
+        queuedSuffix: ' 段',
+        importDone: '记忆提炼完成',
+        currentPersona: '当前人格',
+        boundPrefix: '已绑定：',
         importedTurn: '导入',
-        failedJobsPrefix: '有 ', failedJobsSuffix: ' 条记忆后台提炼失败',
-        retryFailed: '重试失败项', retriedPrefix: '已重新排队 ', retriedSuffix: ' 条失败任务',
+        failedJobsPrefix: '有 ',
+        failedJobsSuffix: ' 条记忆后台提炼失败',
+        retryFailed: '重试失败项',
+        retriedPrefix: '已重新排队 ',
+        retriedSuffix: ' 条失败任务',
+        createFirstHint: '先创建一个人格，即可开启跨会话记忆管理。',
+        requestError: '无法读取人格记忆',
       },
       en: {
-        title: 'Persona Continuity', normal: 'Standard chat', persona: 'Persona', new: 'New persona', name: 'Name',
-        close: 'Close', cancel: 'Cancel', createAndUse: 'Create and use', namePlaceholder: 'Enter a persona name',
-        rename: 'Rename', renamePersona: 'Rename persona',
-        instructions: 'Persona instructions', save: 'Save persona', index: 'Memory index', search: 'Search memories',
-        forget: 'Forget', confirm: 'Delete this long-term memory?', empty: 'No matching memories', source: 'Source chat',
+        title: 'Persona Continuity',
+        normal: 'Standard chat',
+        persona: 'Persona',
+        selectPersona: 'Select persona',
+        new: 'New persona',
+        newPersonaTitle: 'New persona',
+        name: 'Name',
+        instructions: 'Persona instructions',
+        instructionsPlaceholder: 'Describe this persona’s role, focus, and what it should remember…',
+        close: 'Close',
+        cancel: 'Cancel',
+        createAndUse: 'Create and use',
+        namePlaceholder: 'Enter a persona name',
+        rename: 'Rename',
+        renamePersona: 'Rename persona',
+        save: 'Save persona',
+        saved: 'Saved',
+        profileSection: 'Persona profile',
+        autoMemory: 'Auto memory',
+        autoMemoryDesc: 'Automatically extract and update long-term memories after turns. Existing memories remain readable when off.',
+        index: 'Long-term memory',
+        memoryCountSuffix: '',
+        search: 'Search memory title, summary, or content…',
+        forget: 'Delete memory',
+        confirmTitle: 'Delete memory',
+        confirm: 'Delete “{title}”? It will no longer be recalled by this persona.',
+        empty: 'No matching memories',
+        emptyHint: 'Chat with this persona or import from past chats.',
+        source: 'Source chat',
         turn: 'Turn',
-        busy: 'Persona cannot be switched while generating', lockedStarted: 'Persona can’t be changed after the chat starts',
-        bindOnceTitle: 'Confirm persona binding', confirmBind: 'Confirm',
+        turnNumber: 'Turn {n}',
+        openSource: 'View source',
+        sourceModalTitle: 'Memory source',
+        sourceNotConnected: 'Source transcript navigation is not yet connected to the host. Recorded metadata:',
+        sourceTurnFallback: 'Source turn content is not available yet.',
+        backToList: 'Back to list',
+        scopeLabel: 'Scope',
+        updatedAtLabel: 'Updated',
+        revisionPrefix: 'v',
+        busy: 'Persona cannot be switched while generating',
+        lockedStarted: 'Persona can’t be changed after the chat starts',
+        bindOnceTitle: 'Confirm persona binding',
+        confirmBind: 'Confirm',
         bindOnceConfirm: 'Once bound, you cannot change the persona for this chat, and earlier messages will belong to it. Continue?',
         cannotImportBound: ' (cannot import)',
-        edit: 'Edit', saveMemory: 'Save memory',
-        memoryTitle: 'Title', summary: 'Summary', detail: 'Details', loading: 'Loading…',
-        importHistory: 'Import from past chats',
-        importHistoryTitle: 'Import memories from past chats', importAction: 'Bind & extract',
-        importing: 'Extracting…', filterChats: 'Filter past chats', noChats: 'No past chats found',
+        edit: 'Edit',
+        saveMemory: 'Save memory',
+        memoryTitle: 'Title',
+        summary: 'Summary',
+        detail: 'Details',
+        loading: 'Loading…',
+        importHistory: 'Import from chats',
+        importHistoryTitle: 'Import memories from past chats',
+        importAction: 'Bind & extract',
+        importing: 'Extracting…',
+        filterChats: 'Filter past chats',
+        noChats: 'No past chats found',
         unbound: 'Unbound',
         instructionsHint: 'Changes take effect on the next turn for bound chats',
-        queuedPrefix: 'Queued ', queuedMid: ' chunks, skipped ', queuedSuffix: ' duplicates',
-        importDone: 'Memory extraction complete', currentPersona: 'Current persona', boundPrefix: 'Bound to: ',
+        queuedPrefix: 'Queued ',
+        queuedMid: ' chunks, skipped ',
+        queuedSuffix: ' duplicates',
+        importDone: 'Memory extraction complete',
+        currentPersona: 'Current persona',
+        boundPrefix: 'Bound to: ',
         importedTurn: 'Imported',
-        failedJobsPrefix: '', failedJobsSuffix: ' background memory extraction(s) failed',
-        retryFailed: 'Retry failed', retriedPrefix: 'Re-queued ', retriedSuffix: ' failed job(s)',
+        failedJobsPrefix: '',
+        failedJobsSuffix: ' background memory extraction(s) failed',
+        retryFailed: 'Retry failed',
+        retriedPrefix: 'Re-queued ',
+        retriedSuffix: ' failed job(s)',
+        createFirstHint: 'Create a persona to start managing cross-session memories.',
+        requestError: 'Unable to load persona memories',
       },
     }
 
-    const selectStyle = {
-      maxWidth: '12em', color: 'inherit', background: 'var(--dsw-alias-background-primary, Canvas)',
-      border: '1px solid var(--dsw-alias-border-secondary, GrayText)', borderRadius: 6, padding: '3px 6px',
-    }
     const pickerStyle = { display: 'inline-flex', alignItems: 'center', minWidth: 0 }
-    const choiceStyle = { maxWidth: 'clamp(74px, 13vw, 155px)', padding: '0 6px' }
     const labelStyle = { overflow: 'hidden', minWidth: 0, textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
-    const panelStyle = { display: 'grid', gap: 12, maxWidth: 720 }
-    const errorMessage = error => error ? h('span', { role: 'alert' }, error) : null
+    const errorMessage = (error, t) => error ? h('p', { className: 'dpm_error', role: 'alert' }, error || t('requestError')) : null
     const statePath = id => '/state?session=' + encodeURIComponent(id ?? '')
     const queuedText = (t, result) =>
       t('queuedPrefix') + result.queuedChunks + t('queuedMid') + result.duplicateChunks + t('queuedSuffix')
+    const formatText = (template, vars) => Object.entries(vars).reduce(
+      (acc, [key, value]) => acc.replaceAll('{' + key + '}', String(value ?? '')),
+      template,
+    )
+
+    function formatTime(value) {
+      if (!value) return ''
+      const date = new Date(value)
+      return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString()
+    }
+
+    function formatTurn(row, t) {
+      if (row.turn === undefined || row.turn === null) return ''
+      return Number(row.turn) < 0 ? t('importedTurn') : formatText(t('turnNumber'), { n: row.turn })
+    }
 
     function useImportPoll(personaId, active, onDone) {
       useEffect(() => {
@@ -175,7 +345,7 @@ window.__ModuleLoader__.load({
         }
       }, [sessionId, Boolean(state), locked])
 
-      if (!sessionId || !state) return errorMessage(error)
+      if (!sessionId || !state) return errorMessage(error, t)
 
       async function select(id) {
         setMode(null)
@@ -253,6 +423,7 @@ window.__ModuleLoader__.load({
       const renaming = mode === 'rename'
       const canOpen = Boolean(state.editable || state.bindOnce)
       const tooltip = canOpen ? label : state.locked ? t('lockedStarted') : t('busy')
+
       function openRenameMenu(event) {
         if (pending || !(event.target instanceof Element)) return
         const row = event.target.closest('[role="menuitem"], [data-persona-picker]')
@@ -283,7 +454,7 @@ window.__ModuleLoader__.load({
           onClose: () => setMode(current => current === 'menu' ? null : current),
           items: [
             ...(!state.bindOnce ? [{ id: normalOption, label: t('normal') }] : []),
-            { id: createOption, label: t('new'), icon: h(IconPlusOutlineRegular, { size: 16, 'aria-hidden': true }) },
+            { id: createOption, label: t('new'), icon: h(IconPlusOutline16, { size: 16, 'aria-hidden': true }) },
             ...state.personas.map(persona => ({
               id: persona.id, label: h('span', { 'data-persona-id': persona.id }, persona.name),
             })),
@@ -306,7 +477,7 @@ window.__ModuleLoader__.load({
           },
           align: 'start', portal: true,
           anchor: h(Button, {
-            size: 'sm', type: 'button', style: choiceStyle,
+            size: 'sm', variant: 'ghost', type: 'button', className: 'dpm_pickerBtn',
             'aria-label': t('persona') + '：' + label, 'aria-haspopup': 'menu', 'aria-expanded': mode === 'menu',
             title: tooltip,
             disabled: pending,
@@ -336,7 +507,7 @@ window.__ModuleLoader__.load({
             },
           },
           h('span', { style: labelStyle, 'data-persona-id': selected?.id }, label),
-          h(IconChevronDownOutlineRegular, { size: 14, 'aria-hidden': true })),
+          h(IconChevronDownOutline14, { size: 14, 'aria-hidden': true })),
         }),
         h(Menu, {
           anchor: null, anchorPoint: renamePoint, contextual: true, portal: true, autoFocus: true,
@@ -344,7 +515,7 @@ window.__ModuleLoader__.load({
           onClose: () => setMode(current => current === 'context' ? null : current),
           onSelect: () => setMode('rename'),
         }),
-        mode !== 'create' && !renaming && errorMessage(error),
+        mode !== 'create' && !renaming && errorMessage(error, t),
         h(Modal, {
           title: t(renaming ? 'renamePersona' : 'new'), closeLabel: t('close'),
           open: mode === 'create' || renaming, onClose: closeName,
@@ -358,7 +529,7 @@ window.__ModuleLoader__.load({
             'aria-label': t('name'), 'data-modal-autofocus': '', placeholder: t('namePlaceholder'),
             value: name, required: true, maxLength: 48, onChange: event => setName(event.target.value),
           }),
-          errorMessage(error),
+          errorMessage(error, t),
         )),
         h(Modal, {
           title: t('bindOnceTitle'), closeLabel: t('close'),
@@ -370,26 +541,74 @@ window.__ModuleLoader__.load({
       )
     }
 
-    const textareaStyle = { display: 'block', width: '100%' }
-    const actionsStyle = { display: 'flex', gap: 8, flexWrap: 'wrap' }
+    function SourceModal({ open, onClose, row, personaId, t }) {
+      const [sourceData, setSourceData] = useState(null)
+      const [loading, setLoading] = useState(false)
+      const [stubNote, setStubNote] = useState(false)
 
-    function MemoryCard({ row, t, mutate }) {
-      const [edits, setEdits] = useState(null)
+      useEffect(() => {
+        if (!open || !row?.session) return
+        let live = true
+        setLoading(true)
+        setStubNote(false)
+        setSourceData(null)
+        call('/history/source?persona=' + encodeURIComponent(personaId) +
+          '&session=' + encodeURIComponent(row.session) +
+          '&turn=' + encodeURIComponent(row.turn ?? ''))
+          .then(
+            data => { if (live) setSourceData(data) },
+            () => { if (live) setStubNote(true) },
+          )
+          .finally(() => { if (live) setLoading(false) })
+        return () => { live = false }
+      }, [open, personaId, row?.session, row?.turn])
+
+      return h(Modal, {
+        title: t('sourceModalTitle'), closeLabel: t('close'), open, onClose,
+        footer: h(Button, { variant: 'primary', onClick: onClose }, t('close')),
+      },
+      row && h('div', { style: { display: 'grid', gap: 10 } },
+        stubNote && h('p', { className: 'dpm_notice' }, t('sourceNotConnected')),
+        h('div', { className: 'dpm_sourceRow' },
+          h('div', { style: { display: 'grid', gap: 2, minWidth: 0 } },
+            h('span', { className: 'dpm_label' }, row.sessionTitle || t('source')),
+            h('span', { className: 'dpm_mono' }, row.session)),
+          row.turn !== undefined && row.turn !== null && h(Tag, null, formatTurn(row, t))),
+        loading && h('p', { className: 'dpm_hint' }, t('loading')),
+        sourceData?.excerpt
+          ? h('p', { className: 'dpm_detailBody' }, sourceData.excerpt)
+          : !loading && h('p', { className: 'dpm_hint' }, t('sourceTurnFallback')),
+      ))
+    }
+
+    function MemoryDetail({ row, personaId, t, onBack, onOpenSource, mutate }) {
+      const [editing, setEditing] = useState(false)
+      const [edits, setEdits] = useState({ title: row.title, summary: row.summary, detail: row.detail })
       const [busy, setBusy] = useState(false)
       const [error, setError] = useState('')
+      const [confirmDelete, setConfirmDelete] = useState(false)
 
-      function edit() {
+      useEffect(() => {
         setEdits({ title: row.title, summary: row.summary, detail: row.detail })
+        setEditing(false)
         setError('')
-      }
+      }, [row.id, row.title, row.summary, row.detail, row.revision])
 
       async function submit(path, value) {
         if (busy) return
         setBusy(true)
         setError('')
         try {
-          await mutate(path, { id: row.id, edits: value })
-          setEdits(null)
+          await mutate(path, {
+            id: row.id,
+            edits: value,
+            revision: row.revision,
+          })
+          setEditing(false)
+          if (path === '/forget') {
+            setConfirmDelete(false)
+            onBack()
+          }
         } catch (failure) {
           setError(failure.message)
         } finally {
@@ -397,38 +616,89 @@ window.__ModuleLoader__.load({
         }
       }
 
-      const field = (key, label, maxLength, control, props = {}) => h('label', null, t(label),
-        h(control, {
-          ...props, value: edits[key], required: true, maxLength, disabled: busy,
-          onChange: event => setEdits({ ...edits, [key]: event.target.value }),
-        }))
-      const button = (label, onClick) => h(Button, {
-        size: 'sm', variant: 'outline', type: 'button', disabled: busy, onClick,
-      }, t(label))
+      const turnLabel = formatTurn(row, t)
+      const updatedLabel = formatTime(row.updatedAt)
 
-      return h('details', null,
-        h('summary', null, row.title, ' · ', row.summary),
-        h('p', { style: { overflowWrap: 'anywhere' } }, t('source'), ' ', row.session, ' · ', t('turn'), ' ',
-          row.turn < 0 ? t('importedTurn') : row.turn),
-        edits ? h('form', {
-          style: panelStyle, onSubmit: event => {
+      return h('div', { className: 'dpm_detailBox' },
+        h('div', { className: 'dpm_cardHeader' },
+          h(Button, { size: 'sm', variant: 'ghost', type: 'button', disabled: busy, onClick: onBack },
+            h(IconChevronLeftOutline14, { size: 14, 'aria-hidden': true }),
+            t('backToList')),
+          h('div', { className: 'dpm_meta' },
+            row.workspaceKey && h(Tag, null, row.workspaceKey),
+          ),
+        ),
+        editing ? h('form', {
+          style: { display: 'grid', gap: 10 },
+          onSubmit: event => {
             event.preventDefault()
             void submit('/edit', edits)
           },
         },
-        field('title', 'memoryTitle', 90, Input),
-        field('summary', 'summary', 160, Input),
-        field('detail', 'detail', 1800, 'textarea', { rows: 5, style: textareaStyle }),
-        h('div', { style: actionsStyle },
+        h('label', { className: 'dpm_field' },
+          h('span', { className: 'dpm_label' }, t('memoryTitle')),
+          h(Input, {
+            value: edits.title, required: true, maxLength: 90, disabled: busy,
+            onChange: event => setEdits({ ...edits, title: event.target.value }),
+          })),
+        h('label', { className: 'dpm_field' },
+          h('span', { className: 'dpm_label' }, t('summary')),
+          h(Input, {
+            value: edits.summary, required: true, maxLength: 160, disabled: busy,
+            onChange: event => setEdits({ ...edits, summary: event.target.value }),
+          })),
+        h('label', { className: 'dpm_field' },
+          h('span', { className: 'dpm_label' }, t('detail')),
+          h('textarea', {
+            className: 'dpm_textarea', rows: 6, maxLength: 1800, required: true, disabled: busy,
+            value: edits.detail, onChange: event => setEdits({ ...edits, detail: event.target.value }),
+          })),
+        h('div', { className: 'dpm_actions' },
           h(Button, { size: 'sm', variant: 'primary', type: 'submit', disabled: busy }, t('saveMemory')),
-          button('cancel', () => { setEdits(null); setError('') })),
+          h(Button, {
+            size: 'sm', variant: 'outline', type: 'button', disabled: busy,
+            onClick: () => { setEditing(false); setError('') },
+          }, t('cancel')),
+        ),
         ) : h(React.Fragment, null,
-          h('p', { style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } }, row.detail),
-          h('div', { style: actionsStyle },
-            button('edit', edit),
-            button('forget', () => { if (window.confirm(t('confirm'))) void submit('/forget') }),
-          )),
-        errorMessage(error),
+          h('div', { style: { display: 'grid', gap: 4 } },
+            h('h4', { className: 'dpm_cardTitle' }, row.title),
+            h('p', { className: 'dpm_hint' }, row.summary),
+          ),
+          h('p', { className: 'dpm_detailBody' }, row.detail),
+          h('div', { className: 'dpm_sourceRow' },
+            h('div', { style: { display: 'grid', gap: 2, minWidth: 0 } },
+              h('span', { className: 'dpm_meta' },
+                t('source') + ': ' + (row.sessionTitle || row.session),
+                turnLabel ? ' · ' + turnLabel : ''),
+              updatedLabel && h('span', { className: 'dpm_meta' },
+                h(IconClockOutline16, { size: 12, 'aria-hidden': true }),
+                t('updatedAtLabel') + ' ' + updatedLabel),
+            ),
+            row.session && h(Button, {
+              size: 'sm', variant: 'outline', type: 'button',
+              onClick: () => onOpenSource(row),
+            },
+            h(IconLinkOutline14, { size: 14, 'aria-hidden': true }),
+            t('openSource')),
+          ),
+          h('div', { className: 'dpm_actions' },
+            h(Button, { size: 'sm', variant: 'outline', type: 'button', disabled: busy, onClick: () => setEditing(true) },
+              h(IconEditOutline16, { size: 14, 'aria-hidden': true }),
+              t('edit')),
+            h(Button, { size: 'sm', variant: 'outline', type: 'button', disabled: busy, onClick: () => setConfirmDelete(true) },
+              h(IconTrashOutline16, { size: 14, 'aria-hidden': true }),
+              t('forget')),
+          ),
+        ),
+        errorMessage(error, t),
+        h(Modal, {
+          title: t('confirmTitle'), closeLabel: t('close'),
+          open: confirmDelete, onClose: () => { if (!busy) setConfirmDelete(false) },
+          footer: h(React.Fragment, null,
+            h(Button, { variant: 'outline', disabled: busy, onClick: () => setConfirmDelete(false) }, t('cancel')),
+            h(Button, { variant: 'primary', disabled: busy, onClick: () => { void submit('/forget') } }, t('forget'))),
+        }, h('p', { style: { margin: 0 } }, formatText(t('confirm'), { title: row.title }))),
       )
     }
 
@@ -491,8 +761,8 @@ window.__ModuleLoader__.load({
           type: 'search', placeholder: t('filterChats'), value: filter, maxLength: 100, disabled: busy,
           onChange: event => setFilter(event.target.value),
         }),
-        sessions === null ? h('p', null, t('loading'))
-          : !visible.length ? h('p', null, t('noChats'))
+        sessions === null ? h('p', { className: 'dpm_hint' }, t('loading'))
+          : !visible.length ? h('p', { className: 'dpm_empty' }, t('noChats'))
           : h('div', { style: { display: 'grid', gap: 6, maxHeight: 320, overflowY: 'auto' } },
             visible.map(item => {
               const blocked = Boolean(item.personaId && item.personaId !== id)
@@ -500,7 +770,7 @@ window.__ModuleLoader__.load({
                 key: item.id,
                 style: {
                   display: 'flex', alignItems: 'flex-start', gap: 8, padding: '6px 4px',
-                  cursor: blocked ? 'not-allowed' : 'pointer', opacity: blocked ? 0.6 : 1,
+                  cursor: blocked ? 'not-allowed' : 'pointer', opacity: blocked ? 0.55 : 1,
                 },
               },
               h('input', {
@@ -508,21 +778,23 @@ window.__ModuleLoader__.load({
                 onChange: () => toggle(item.id),
               }),
               h('span', { style: { display: 'grid', gap: 2, minWidth: 0 } },
-                h('strong', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, item.title),
-                h('span', { style: { fontSize: 12, opacity: 0.75 } },
+                h('strong', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13 } }, item.title),
+                h('span', { className: 'dpm_hint' },
                   new Date(item.createdAt).toLocaleString() + ' · ' +
                   (item.personaId
                     ? (item.personaId === id ? t('currentPersona') : t('boundPrefix') + item.personaName + t('cannotImportBound'))
                     : t('unbound'))),
               ))
             })),
-        errorMessage(error),
+        errorMessage(error, t),
       ))
     }
 
     function MemoryPanel({ id, t }) {
       const [query, setQuery] = useState('')
       const [rows, setRows] = useState(null)
+      const [selectedId, setSelectedId] = useState('')
+      const [sourceRow, setSourceRow] = useState(null)
       const [revision, setRevision] = useState(0)
       const [error, setError] = useState('')
       const [importOpen, setImportOpen] = useState(false)
@@ -557,7 +829,7 @@ window.__ModuleLoader__.load({
         const timer = setTimeout(() => {
           call('/index' + persona + '&q=' + encodeURIComponent(query))
             .then(value => { if (live) setRows(value) }, failure => { if (live) setError(failure.message) })
-        }, 180)
+        }, 160)
         return () => { live = false; clearTimeout(timer) }
       }, [persona, query, revision])
 
@@ -584,25 +856,55 @@ window.__ModuleLoader__.load({
         }
       }
 
-      return h('div', { style: panelStyle },
-        h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' } },
-          h('h3', { style: { margin: 0 } }, t('index')),
-          h(Button, { type: 'button', size: 'sm', variant: 'outline', onClick: () => setImportOpen(true) }, t('importHistory'))),
-        failedCount > 0 && h('div', {
-          role: 'status',
-          style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', fontSize: 13 },
-        },
-        h('span', null, t('failedJobsPrefix') + failedCount + t('failedJobsSuffix')),
-        h(Button, { type: 'button', size: 'sm', variant: 'outline', disabled: retrying, onClick: retryFailedJobs }, t('retryFailed'))),
-        notice && h('p', { style: { margin: 0, fontSize: 13 } }, notice),
-        h(Input, {
+      const activeRow = rows?.find(row => row.id === selectedId) ?? null
+
+      return h('div', { className: 'dpm_card' },
+        h('div', { className: 'dpm_cardHeader' },
+          h('div', { className: 'dpm_actions' },
+            h('h3', { className: 'dpm_cardTitle' }, t('index')),
+            rows !== null && h(Tag, null, String(rows.length) + t('memoryCountSuffix')),
+          ),
+          h(Button, { type: 'button', size: 'sm', variant: 'outline', onClick: () => setImportOpen(true) },
+            t('importHistory')),
+        ),
+        failedCount > 0 && h('div', { className: 'dpm_warnBanner', role: 'status' },
+          h('span', null, t('failedJobsPrefix') + failedCount + t('failedJobsSuffix')),
+          h(Button, { type: 'button', size: 'sm', variant: 'outline', disabled: retrying, onClick: retryFailedJobs },
+            h(IconRefreshOutline16, { size: 14, 'aria-hidden': true }),
+            t('retryFailed'))),
+        notice && h('p', { className: 'dpm_notice', role: 'status' }, notice),
+        !activeRow && h(Input, {
           type: 'search', 'aria-label': t('search'), placeholder: t('search'), value: query, maxLength: 300,
+          prefix: h(IconSearchOutline16, { size: 16, 'aria-hidden': true }),
           onChange: event => { setRows(null); setQuery(event.target.value) },
         }),
-        rows === null ? h('p', null, t('loading')) : rows.length
-          ? rows.map(row => h(MemoryCard, { key: row.id, row, t, mutate }))
-          : h('p', null, t('empty')),
-        errorMessage(error),
+        rows === null ? h('p', { className: 'dpm_hint' }, t('loading'))
+          : activeRow ? h(MemoryDetail, {
+            row: activeRow, personaId: id, t,
+            onBack: () => setSelectedId(''),
+            onOpenSource: row => setSourceRow(row),
+            mutate,
+          })
+          : rows.length ? h('div', { className: 'dpm_list' },
+            rows.map(row => h('button', {
+              key: row.id, type: 'button', className: 'dpm_item',
+              onClick: () => setSelectedId(row.id),
+            },
+            h('div', { className: 'dpm_itemTop' },
+              h('span', { className: 'dpm_itemTitle' }, row.title),
+              row.revision !== undefined && h(Tag, null, t('revisionPrefix') + row.revision),
+            ),
+            row.summary && h('p', { className: 'dpm_itemSummary' }, row.summary),
+            h('div', { className: 'dpm_meta' },
+              row.workspaceKey && h(Tag, null, row.workspaceKey),
+              row.session && h('span', null, (row.sessionTitle || row.session) +
+                (formatTurn(row, t) ? ' · ' + formatTurn(row, t) : '')),
+              row.updatedAt && h('span', null, formatTime(row.updatedAt)),
+            ))))
+          : h('div', { className: 'dpm_empty' },
+            h('p', { style: { margin: '0 0 4px' } }, t('empty')),
+            h('p', { className: 'dpm_hint' }, t('emptyHint'))),
+        errorMessage(error, t),
         h(HistoryImportModal, {
           id, t, open: importOpen, onClose: () => setImportOpen(false),
           onImported: result => {
@@ -610,6 +912,10 @@ window.__ModuleLoader__.load({
             if (result.queuedChunks > 0) setPolling(true)
             setRevision(current => current + 1)
           },
+        }),
+        h(SourceModal, {
+          open: Boolean(sourceRow), onClose: () => setSourceRow(null),
+          row: sourceRow, personaId: id, t,
         }),
       )
     }
@@ -619,31 +925,50 @@ window.__ModuleLoader__.load({
       const [id, setId] = useState('')
       const [name, setName] = useState('')
       const [instructions, setInstructions] = useState('')
+      const [autoMemory, setAutoMemory] = useState(true)
+      const [menuOpen, setMenuOpen] = useState(false)
+      const [savedFlag, setSavedFlag] = useState(false)
       const [error, setError] = useState('')
       const [busy, setBusy] = useState(false)
 
+      function syncSelection(list, targetId) {
+        const persona = list.find(item => item.id === targetId)
+        setId(persona ? persona.id : '')
+        setName(persona?.name ?? '')
+        setInstructions(persona?.instructions ?? '')
+        setAutoMemory(persona?.autoMemory ?? true)
+        setBusy(true)
+      }
+
       useEffect(() => {
         let live = true
-        call('/state').then(value => { if (live) setPersonas(value.personas) },
-          failure => { if (live) setError(failure.message) })
+        call('/state').then(value => {
+          if (!live) return
+          const list = value.personas ?? []
+          setPersonas(list)
+          if (list.length) syncSelection(list, list[0].id)
+        }, failure => { if (live) setError(failure.message) })
         return () => { live = false }
       }, [])
 
-      function choose(next) {
-        const persona = personas.find(item => item.id === next)
-        setId(next)
-        setName(persona?.name ?? '')
-        setInstructions(persona?.instructions ?? '')
+      function choose(nextId) {
+        setMenuOpen(false)
+        setSavedFlag(false)
         setError('')
+        syncSelection(personas, nextId === createOption ? '' : nextId)
       }
 
       async function save(event) {
         event.preventDefault()
+        if (busy) return
         setBusy(true)
+        setSavedFlag(false)
         try {
           const saved = await call('/persona', { id, name, instructions })
-          setPersonas((await call('/state')).personas)
-          setId(saved.id)
+          const latest = (await call('/state')).personas ?? []
+          setPersonas(latest)
+          syncSelection(latest, saved.id)
+          setSavedFlag(true)
           setError('')
           window.dispatchEvent(new Event(changedEvent))
         } catch (failure) {
@@ -653,836 +978,109 @@ window.__ModuleLoader__.load({
         }
       }
 
-      return h('section', { style: panelStyle },
-        h('label', null, t('persona'), ' ', h('select', { style: selectStyle, value: id, disabled: busy, onChange: e => choose(e.target.value) },
-          h('option', { value: '' }, t('new')),
-          personas.map(persona => h('option', { key: persona.id, value: persona.id }, persona.name)))),
-        h('form', { onSubmit: save, style: panelStyle },
-          h('label', null, t('name'), ' ', h(Input, { value: name, required: true, maxLength: 48, onChange: e => setName(e.target.value) })),
-          h('label', null, t('instructions'), h('textarea', {
-            value: instructions, rows: 4, maxLength: 3500,
-            style: textareaStyle, onChange: e => setInstructions(e.target.value),
-          }), h('span', { style: { display: 'block', fontSize: 12, opacity: 0.75, marginTop: 4 } }, t('instructionsHint'))),
-          h(Button, { variant: 'primary', type: 'submit', disabled: busy, style: { justifySelf: 'start' } }, t('save'))),
-        errorMessage(error),
-        id && h(MemoryPanel, { key: id, id, t }),
-      )
-    }
-
-    const sampleRoles = [
-      { id: 'patient-1', name: '初诊患者', group: '患者', background: '第一次就诊，听到专业术语容易紧张，倾向于回家再看说明。' },
-      { id: 'patient-2', name: '复诊患者', group: '患者', background: '需要在工作日安排复诊，希望记住这次沟通中提到的事项。' },
-      { id: 'doctor-1', name: '门诊医生', group: '医生', background: '门诊时间紧，希望用简洁的表达，并确认患者理解了关键事项。' },
-    ]
-    const sampleQuestions = [
-      { id: 'clarity', text: '从你的角色看，本次用药沟通中关键信息讲清楚了吗？', options: ['清楚', '部分清楚', '不清楚'] },
-      { id: 'confirmation', text: '本次沟通中，患者有没有用自己的话确认理解？', options: ['有', '没有', '不确定'] },
-      { id: 'remaining', text: '还有哪些疑问，或哪一步沟通可以更清楚？' },
-    ]
-    const sampleMaterial = '这是虚构的门诊沟通场景。就诊结束时，医生介绍了用药安排，并交给患者一份书面说明。双方需要确认患者理解了哪些信息，还有哪些疑问。请评价沟通过程。'
-    function readMarkdownQuestionnaire(text, fileName) {
-      const questions = []
-      const material = []
-      let title = ''
-      let section = ''
-      let current
-      for (const [index, raw] of text.split(/\r?\n/u).entries()) {
-        const line = raw.trim().replace(/^\*\*(.+)\*\*$/u, '$1')
-        if (!line) continue
-        const documentTitle = line.match(/^#\s+(.+)$/u)
-        if (!title && documentTitle && !current) {
-          title = documentTitle[1]
-          continue
-        }
-        const heading = line.match(/^#{2,6}\s+(.+)$/u)?.[1]
-        if (heading && /^(公共材料|背景材料|问卷说明|说明)$/u.test(heading)) {
-          section = 'material'
-          current = undefined
-          continue
-        }
-        if (heading && /^(题目|问卷题目|调查题目)$/u.test(heading)) {
-          section = 'questions'
-          current = undefined
-          continue
-        }
-        const numbered = line.match(/^(?:第\s*\d+\s*题\s*[：:]?|\d+\s*[.、)）])\s*(.+)$/u)?.[1]
-        if (heading || (numbered && section !== 'material')) {
-          const prompt = (heading ?? numbered)
-            .replace(/^\s*(?:第\s*\d+\s*题\s*[：:]?|\d+\s*[.、)）])\s*/u, '')
-            .replace(/^\s*[［\[（(](?:单选题?|开放题)[］\]）)]\s*|\s*[［\[（(](?:单选题?|开放题)[］\]）)]\s*$/gu, '')
-            .trim()
-          if (!prompt) throw new Error('第 ' + (index + 1) + ' 行缺少题干')
-          current = { id: crypto.randomUUID(), text: prompt, options: [] }
-          questions.push(current)
-          section = 'questions'
-          continue
-        }
-        if (section === 'material' || (!current && !section)) {
-          material.push(raw)
-          continue
-        }
-        const option = line.match(/^(?:[-*+]\s+|[A-Z][.、)）]\s*)(.+)$/iu)?.[1]
-        if (current && option) {
-          current.options.push(option.replace(/^[A-Z][.、)）]\s*/iu, ''))
-          continue
-        }
-        throw new Error('Markdown 第 ' + (index + 1) + ' 行无法识别。请用标题或编号写题目，用列表写选项。')
-      }
-      return { title: title || fileName.replace(/\.md$/iu, '').slice(0, 100), material: material.join('\n'), questions }
-    }
-
-    async function readQuestionnaireFile(file) {
-      if (file.size > 180000) throw new Error('问卷文件须小于 180 KB')
-      const text = (await file.text()).replace(/^\uFEFF/u, '')
-      if (/\.json$/iu.test(file.name)) {
-        let imported
-        try { imported = JSON.parse(text) }
-        catch { throw new Error('JSON 格式有误，请检查文件') }
-        if (!imported || !Array.isArray(imported.questions)) throw new Error('JSON 需要包含 questions 题目数组')
-        return {
-          title: imported.title,
-          material: imported.material,
-          questions: imported.questions.map(question => ({
-            id: question?.id ?? crypto.randomUUID(),
-            text: question?.text,
-            options: question?.options,
-          })),
-        }
-      }
-      if (/\.md$/iu.test(file.name)) return readMarkdownQuestionnaire(text, file.name)
-      if (!/\.tsv$/iu.test(file.name)) throw new Error('请选择 Markdown、JSON 或 TSV 文件')
-      const lines = text.split(/\r?\n/u).filter(line => line.trim())
-      if (lines[0]?.trim() !== '题干\t题型\t选项') throw new Error('TSV 表头须为「题干、题型、选项」三列')
-      const questions = lines.slice(1).map((line, index) => {
-        const [text, kind, choices = '', ...extra] = line.split('\t').map(cell => cell.trim())
-        if (extra.length || !text || !['单选题', '开放题'].includes(kind) ||
-          (kind === '开放题' && choices)) {
-          throw new Error('第 ' + (index + 2) + ' 行的题干、题型或选项格式有误')
-        }
-        return {
-          id: crypto.randomUUID(), text,
-          options: kind === '单选题' ? choices.split('|').map(choice => choice.trim()) : [],
-        }
-      })
-      return { title: file.name.replace(/\.tsv$/iu, '').slice(0, 100), material: '', questions }
-    }
-    const surveyColumns = {
-      display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))',
-      gap: 20, alignItems: 'start',
-    }
-    const surveyCard = {
-      display: 'grid', gap: 14, minWidth: 0, padding: 18, borderRadius: 12,
-      border: '1px solid var(--dsw-alias-border-secondary, #72727266)',
-      background: 'var(--dsw-alias-background-secondary, transparent)',
-    }
-    const surveyField = { display: 'grid', gap: 5, minWidth: 0 }
-    const surveyTextarea = { ...textareaStyle, boxSizing: 'border-box', resize: 'vertical', padding: 8, borderRadius: 8 }
-    const jobStatus = { queued: '排队中', running: '作答中', done: '已完成', failed: '失败' }
-
-    function safeSpreadsheetText(value) {
-      const text = String(value ?? '')
-      return /^\s*[=+@-]/u.test(text) ? "'" + text : text
-    }
-
-    function downloadTextFile(body, filename, type) {
-      const url = URL.createObjectURL(new Blob(['\uFEFF', body], { type: type + ';charset=utf-8' }))
-      const link = document.createElement('a')
-      link.href = url
-      link.download = filename
-      document.body.append(link)
-      try { link.click() } finally {
-        link.remove()
-        setTimeout(() => URL.revokeObjectURL(url), 1000)
-      }
-    }
-
-    function downloadSurveyResults(result) {
-      const rows = [
-        ['角色编号', '角色名称', '分组', '状态', '失败原因', ...result.questions.map(question => question.text)],
-        ...result.jobs.map(job => {
-          const answers = new Map(job.answers.map(answer => [answer.id, answer.answer]))
-          return [job.role, job.name, job.group, jobStatus[job.status], job.error,
-            ...result.questions.map(question => answers.get(question.id))]
-        }),
-      ]
-      const encodeCell = value => '"' + safeSpreadsheetText(value).replace(/"/g, '""') + '"'
-      const body = rows.map(row => row.map(encodeCell).join(',')).join('\r\n') + '\r\n'
-      const name = '问卷答卷-' + result.title.replace(/[<>:"/\\|?*\u0000-\u001f]/gu, '_').slice(0, 80) + '.csv'
-      downloadTextFile(body, name, 'text/csv')
-    }
-
-    const calibrationHeader = '题目ID\t题干\t选项序号\t选项\t人数'
-    const calibrationGroup = cohort => cohort === null ? '全部角色' : '分组：' + (cohort || '未分组')
-    const tsvLabel = value => value.replace(/[\r\n\t]+/gu, ' ').replaceAll('"', '”').trim()
-
-    function downloadCalibrationTemplate(questions, runId, cohort) {
-      const rows = [
-        '运行编号\t' + runId,
-        '对比分组\t' + tsvLabel(calibrationGroup(cohort)),
-        '数据来源\t',
-        '样本总人数\t',
-        calibrationHeader,
-        ...questions.flatMap(question => question.options.map((option, index) => [
-          safeSpreadsheetText(question.id), safeSpreadsheetText(tsvLabel(question.text)), index + 1,
-          safeSpreadsheetText(tsvLabel(option)), '',
-        ].join('\t'))),
-      ]
-      downloadTextFile(rows.join('\r\n') + '\r\n', '真人校准模板.tsv', 'text/tab-separated-values')
-    }
-
-    async function readCalibrationFile(file, questions, runId, cohort) {
-      if (file.size > 200000) throw new Error('校准文件须小于 200 KB')
-      const text = (await file.text()).replace(/^\uFEFF/u, '')
-      if (/\.json$/iu.test(file.name)) {
-        let input
-        try { input = JSON.parse(text) }
-        catch { throw new Error('JSON 格式有误，请检查文件') }
-        if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('JSON 需要 source、total 和 rows')
-        if ((input.runId !== undefined && input.runId !== runId) ||
-          (input.cohort !== undefined && input.cohort !== cohort)) throw new Error('文件的运行记录或分组与当前选择不一致')
-        return { source: input.source, total: input.total, rows: input.rows }
-      }
-      if (!/\.tsv$/iu.test(file.name)) throw new Error('请选择 JSON 或 TSV 文件')
-      const lines = text.split(/\r?\n/u)
-      const metadata = ['运行编号', '对比分组', '数据来源', '样本总人数'].map((key, index) => {
-        const row = lines[index]?.split('\t')
-        if (row?.[0] !== key) throw new Error('TSV 格式有误，请从当前校准页下载模板')
-        return row[1]?.trim() ?? ''
-      })
-      if (lines[4]?.trim() !== calibrationHeader) throw new Error('TSV 表头有误，请使用下载的模板')
-      if (metadata[0] !== runId || metadata[1] !== tsvLabel(calibrationGroup(cohort))) {
-        throw new Error('文件的运行记录或分组与当前选择不一致')
-      }
-      const rows = new Map()
-      const seen = new Set()
-      for (const [index, line] of lines.slice(5).entries()) {
-        if (!line.trim()) continue
-        const [id, prompt, position, option, entry = '', ...extra] = line.split('\t').map(cell => cell.trim())
-        const question = questions.find(question => id === question.id || id === safeSpreadsheetText(question.id))
-        const slot = Number(position) - 1
-        const matchesLabel = (value, label) => value === tsvLabel(label) || value === safeSpreadsheetText(tsvLabel(label))
-        if (extra.length || !question || !Number.isInteger(slot) || question.options[slot] === undefined ||
-          !matchesLabel(prompt, question.text) || !matchesLabel(option, question.options[slot])) {
-          throw new Error('第 ' + (index + 6) + ' 行的题目或选项与当前运行不一致')
-        }
-        const key = JSON.stringify([question.id, slot])
-        if (seen.has(key)) throw new Error('第 ' + (index + 6) + ' 行重复填写了同一选项')
-        seen.add(key)
-        if (!entry) continue
-        if (!/^\d+$/u.test(entry)) throw new Error('第 ' + (index + 6) + ' 行人数须为非负整数')
-        if (!rows.has(question.id)) rows.set(question.id, question.options.map(() => 0))
-        rows.get(question.id)[slot] = Number(entry)
-      }
-      return { source: metadata[2], total: Number(metadata[3]), rows: [...rows].map(([id, counts]) => ({ id, counts })) }
-    }
-
-    const field = (label, control) => h('label', { style: surveyField }, h('span', null, label), control)
-    const action = (label, onClick, disabled = false) =>
-      h(Button, { type: 'button', size: 'sm', variant: 'outline', onClick, disabled, style: { justifySelf: 'start' } }, label)
-    const surveyInput = (value, change, props = {}) =>
-      h(Input, { ...props, value, onChange: event => change(event.target.value) })
-    const surveyText = (value, change, rows, maxLength) => h('textarea', {
-      value, rows, maxLength, style: surveyTextarea, onChange: event => change(event.target.value),
-    })
-    const updateItem = (setter, index, patch) =>
-      setter(items => items.map((item, position) => position === index ? { ...item, ...patch } : item))
-
-    function useSurveyLibrary(kind) {
-      const path = '/simulation/' + kind
-      const [items, setItems] = useState([])
-      const [error, setError] = useState('')
-      const refresh = () => call(path).then(setItems)
-      useEffect(() => {
-        let live = true
-        call(path).then(value => { if (live) setItems(value) }, failure => { if (live) setError(failure.message) })
-        return () => { live = false }
-      }, [path])
-      return {
-        items, error, refresh,
-        read: id => call(path + '/item?id=' + encodeURIComponent(id)),
-        save: data => call(path + '/save', data),
-        remove: id => call(path + '/remove', { id }),
-      }
-    }
-
-    const tsvHeader = '编号\t名称\t分组\t背景'
-    function readStudentSheet(text) {
-      const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/u).filter(line => line.trim())
-      if (lines[0]?.trim() !== tsvHeader) throw new Error('请用「编号、名称、分组、背景」四列表头，并从表格复制或导入 TSV。')
-      if (lines.length < 2) throw new Error('请至少录入一名学生')
-      return lines.slice(1).map((line, index) => {
-        const columns = line.split('\t').map(value => value.trim())
-        if (columns.length !== 4 || !columns[0] || !columns[3]) throw new Error('第 ' + (index + 2) + ' 行需要四列，编号和背景必填')
-        const [id, name, group, background] = columns
-        return { id, name, group, background }
-      })
-    }
-
-    function StudentBatches({ library, onApply }) {
-      const [id, setId] = useState('')
-      const [title, setTitle] = useState('')
-      const [sheet, setSheet] = useState(tsvHeader + '\n')
-      const [preview, setPreview] = useState([])
-      const [busy, setBusy] = useState(false)
-      const [error, setError] = useState('')
-      const [notice, setNotice] = useState('')
-
-      async function perform(run) {
-        setBusy(true)
+      async function toggleAutoMemory(next) {
+        if (!id || busy) return
+        const value = typeof next === 'boolean' ? next : !autoMemory
+        setAutoMemory(value)
+        setAutoMemoryNotice('')
         setError('')
-        setNotice('')
-        try { await run() } catch (failure) { setError(failure.message) }
-        finally { setBusy(false) }
+        try {
+          await call('/memory/settings', { persona: id, autoMemory: value })
+          setPersonas(current => current.map(item => item.id === id ? { ...item, autoMemory: value } : item))
+          window.dispatchEvent(new Event(changedEvent))
+        } catch (failure) {
+          setAutoMemory(!value)
+          setError(failure.message)
+        } finally {
+          setBusy(false)
+        }
       }
-      function reset() {
-        setId('')
-        setTitle('')
-        setSheet(tsvHeader + '\n')
-        setPreview([])
-        setNotice('')
-        setError('')
-      }
-      function load(id) {
-        if (!id) return reset()
-        void perform(async () => {
-          const batch = await library.read(id)
-          const rows = batch.roles.map(role => [role.id, role.name, role.group, role.background]
-            .map(value => value.replace(/[\t\r\n]+/gu, ' ')).join('\t'))
-          setId(id)
-          setTitle(batch.title)
-          setSheet([tsvHeader, ...rows].join('\n'))
-          setPreview(batch.roles)
-        })
-      }
-      function changeSheet(value) {
-        setSheet(value)
-        setPreview([])
-        setNotice('')
-      }
-      return h('div', { style: surveyColumns },
-        h('section', { style: surveyCard },
-          h('h2', null, '学生批次'),
-          field('已保存批次', h('select', {
-            value: id, disabled: busy, onChange: event => load(event.target.value), style: { ...selectStyle, maxWidth: '100%' },
-          }, h('option', { value: '' }, '新建批次'), library.items.map(batch =>
-            h('option', { key: batch.id, value: batch.id }, batch.title + ' · ' + batch.count + ' 人')))),
-          field('批次名称', surveyInput(title, setTitle, { maxLength: 100 })),
-          field('导入 TSV 文件', h('input', {
-            type: 'file', accept: '.tsv,.txt,text/tab-separated-values', disabled: busy,
-            onChange: event => {
-              const file = event.target.files[0]
-              event.target.value = ''
-              if (file) void perform(async () => changeSheet(await file.text()))
+
+      const activePersona = personas.find(item => item.id === id)
+      const selectorLabel = activePersona?.name ?? t('new')
+
+      return h('section', { className: 'dpm_root' },
+        h('div', { className: 'dpm_toolbar' },
+          h('div', { className: 'dpm_toolbarLeft' },
+            h(Menu, {
+              open: menuOpen,
+              onClose: () => setMenuOpen(false),
+              selectedId: id || createOption,
+              onSelect: choose,
+              align: 'start',
+              portal: true,
+              items: [
+                { id: createOption, label: t('new'), icon: h(IconPlusOutline16, { size: 16, 'aria-hidden': true }) },
+                ...personas.map(item => ({
+                  id: item.id,
+                  label: item.name,
+                  icon: h(IconUserOutline16, { size: 16, 'aria-hidden': true }),
+                })),
+              ],
+              anchor: h('button', {
+                type: 'button',
+                className: 'dpm_selectorBtn',
+                disabled: busy,
+                'aria-label': t('selectPersona'),
+                'aria-haspopup': 'menu',
+                'aria-expanded': menuOpen,
+                onClick: () => setMenuOpen(open => !open),
+              },
+              h(IconUserOutline16, { size: 16, 'aria-hidden': true }),
+              h('span', { className: 'dpm_selectorText' }, selectorLabel),
+              h(IconChevronDownOutline14, { size: 14, 'aria-hidden': true })),
+            }),
+            id && h('span', { className: 'dpm_mono' }, id),
+          ),
+          h('div', { className: 'dpm_toolbarRight' },
+            h(Button, {
+              type: 'button', size: 'sm', variant: 'outline', disabled: busy,
+              onClick: () => choose(createOption),
             },
-          })),
-          field('粘贴表格', surveyText(sheet, changeSheet, 8)),
-          h('p', null, '从表格复制「编号、名称、分组、背景」四列，保留表头。每行一人，编号和背景必填。'),
-          h('div', { style: actionsStyle },
-            action('预览学生', () => perform(async () => setPreview(readStudentSheet(sheet))), busy),
-            action('保存批次', () => perform(async () => {
-              const roles = readStudentSheet(sheet)
-              const saved = await library.save({ id, title, roles })
-              setId(saved.id)
-              setPreview(roles)
-              await library.refresh()
-              setNotice('批次已保存')
-            }), busy),
-            id && action('删除批次', () => {
-              if (window.confirm('删除选中的学生批次？')) void perform(async () => {
-                await library.remove(id)
-                reset()
-                await library.refresh()
-              })
-            }, busy)),
-          errorMessage(error || library.error),
-          notice && h('p', { role: 'status' }, notice)),
-        h('section', { style: surveyCard },
-          h('h2', null, '批次预览'),
-          preview.length ? h(React.Fragment, null,
-            h('p', null, preview.length + ' 名学生 · 显示前 ' + Math.min(preview.length, 10) + ' 名'),
-            h('ul', null, preview.slice(0, 10).map(role => h('li', { key: role.id },
-              [role.id, role.name, role.group].filter(Boolean).join(' · ')))),
-            action('用于当前问卷', () => onApply(preview), busy))
-            : h('p', null, '导入或选择批次后，这里会显示学生名单。')))
-    }
-
-    const surveyEditorPageSize = 5
-    const surveyEditorStyles = `
-      @container persona-survey-editors (min-width: 620px) {
-        .persona-survey-questions {
-          contain: size;
-        }
-        .persona-survey-questions > .persona-survey-editor-items {
-          overflow-y: auto;
-          scrollbar-gutter: stable;
-        }
-      }
-    `
-
-    function SurveyEditorColumn({ title, className, headerAction, items, renderItem, addLabel, onAdd, addDisabled }) {
-      const [page, setPage] = useState(0)
-      const current = Math.min(page, Math.max(0, Math.ceil(items.length / surveyEditorPageSize) - 1))
-      const first = current * surveyEditorPageSize
-      const end = Math.min(first + surveyEditorPageSize, items.length)
-      return h('section', { 'aria-label': title, className, style: { ...surveyCard, gridTemplateRows: 'auto minmax(0, 1fr) auto' } },
-        h('header', { style: { ...actionsStyle, alignItems: 'center', justifyContent: 'space-between' } },
-          h('h2', null, title), headerAction),
-        h('div', { className: 'persona-survey-editor-items', style: { display: 'grid', gap: 14, alignContent: 'start', minWidth: 0 } },
-          items.slice(first, end).map((item, offset) => renderItem(item, first + offset))),
-        h('footer', {
-          style: { ...actionsStyle, justifyContent: 'space-between', alignItems: 'center' },
-        },
-        h('div', { style: { ...actionsStyle, alignItems: 'center' }, 'aria-label': title + '分页' },
-          action('上一页', () => setPage(current - 1), current === 0),
-          h('span', { 'aria-live': 'polite' }, (items.length ? first + 1 : 0) + '–' + end + ' / ' + items.length),
-          action('下一页', () => setPage(current + 1), end >= items.length)),
-        action(addLabel, () => {
-          setPage(Math.floor(items.length / surveyEditorPageSize))
-          onAdd()
-        }, addDisabled)))
-    }
-
-    function SurveyEditors({ roles, setRoles, questions, setQuestions, onManageRoles, onImport, busy }) {
-      const remove = (setter, index) => setter(items => items.filter((_, position) => position !== index))
-      return h('div', { style: { ...surveyColumns, alignItems: 'stretch' } },
-        h('style', null, surveyEditorStyles),
-        h(SurveyEditorColumn, {
-          title: '受访角色', headerAction: action('批量管理', onManageRoles), items: roles,
-          renderItem: (role, index) => h('fieldset', { key: role.id, style: surveyCard },
-            h('legend', null, '角色 ' + (index + 1)),
-            field('角色名称', surveyInput(role.name, name => updateItem(setRoles, index, { name }), { maxLength: 64 })),
-            field('分组', surveyInput(role.group, group => updateItem(setRoles, index, { group }), { maxLength: 64 })),
-            field('角色背景', surveyText(role.background, background => updateItem(setRoles, index, { background }), 2, 1800)),
-            action('移除角色', () => remove(setRoles, index), roles.length === 1)),
-          addLabel: '添加角色', onAdd: () => setRoles(items => [
-            ...items, { id: crypto.randomUUID(), name: '', group: '', background: '' },
-          ]),
-        }),
-        h(SurveyEditorColumn, {
-          title: '问卷题目', className: 'persona-survey-questions', headerAction: action('导入问卷', onImport, busy), items: questions,
-          renderItem: (question, index) => h('fieldset', { key: question.id, style: surveyCard },
-            h('legend', null, '第 ' + (index + 1) + ' 题'),
-            field('题干', surveyInput(question.text, text => updateItem(setQuestions, index, { text }), { required: true, maxLength: 800 })),
-            field('题型', h('select', {
-              style: selectStyle, value: question.options ? 'single' : 'open',
-              onChange: event => updateItem(setQuestions, index, { options: event.target.value === 'single' ? ['', ''] : null }),
-            }, h('option', { value: 'single' }, '单选题'), h('option', { value: 'open' }, '开放题'))),
-            question.options && h(React.Fragment, null,
-              question.options.map((option, position) => h('div', { key: position, style: surveyField },
-                field('选项 ' + (position + 1), surveyInput(option, value => updateItem(setQuestions, index, {
-                  options: question.options.map((old, slot) => slot === position ? value : old),
-                }), { required: true, maxLength: 200 })),
-                question.options.length > 2 && action('移除选项 ' + (position + 1), () => updateItem(setQuestions, index, {
-                  options: question.options.filter((_, slot) => slot !== position),
-                })))),
-              action('添加选项', () => updateItem(setQuestions, index, { options: [...question.options, ''] }), question.options.length === 12)),
-            action('移除题目', () => remove(setQuestions, index), questions.length === 1)),
-          addLabel: '添加题目', addDisabled: questions.length === 12,
-          onAdd: () => setQuestions(items => [...items, {
-            id: crypto.randomUUID(), text: '', options: ['', ''],
-          }]),
-        }))
-    }
-
-    function CalibrationForm({ result, runId, cohort, saved, onSaved }) {
-      const questions = result.questions.filter(question => question.options.length)
-      const [source, setSource] = useState(saved?.source ?? '')
-      const [total, setTotal] = useState(saved ? String(saved.total) : '')
-      const [counts, setCounts] = useState(() => Object.fromEntries(
-        (saved?.rows ?? []).map(row => [row.id, row.counts.map(String)]),
-      ))
-      const [busy, setBusy] = useState(false)
-      const [notice, setNotice] = useState('')
-      const [error, setError] = useState('')
-      const jobs = result.jobs.filter(job => cohort === null || job.group === cohort)
-      async function importCalibration(file) {
-        setBusy(true)
-        setNotice('')
-        setError('')
-        try {
-          const data = await readCalibrationFile(file, questions, runId, cohort)
-          const checked = await call('/simulation/calibration/validate', { ...data, id: runId, cohort })
-          setSource(checked.source)
-          setTotal(String(checked.total))
-          setCounts(Object.fromEntries(checked.rows.map(row => [row.id, row.counts.map(String)])))
-          setNotice('已导入 ' + checked.rows.length + ' 道题，请核对后点「保存并对比」')
-        } catch (failure) {
-          setError(failure.message)
-        } finally {
-          setBusy(false)
-        }
-      }
-      async function save(event) {
-        event.preventDefault()
-        setBusy(true)
-        setNotice('')
-        setError('')
-        try {
-          const rows = questions.filter(question => counts[question.id]?.some(value => value !== ''))
-            .map(question => ({ id: question.id, counts: counts[question.id].map(Number) }))
-          await call('/simulation/calibration', { id: runId, cohort, source, total: Number(total), rows })
-          setNotice('真人数据已保存')
-          onSaved()
-        } catch (failure) {
-          setError(failure.message)
-        } finally {
-          setBusy(false)
-        }
-      }
-      if (!questions.length) return h('p', null, '本次问卷只有开放题。可在「模拟结果」查看原文。')
-      return h('div', { style: surveyColumns },
-        h('form', { style: surveyCard, onSubmit: save },
-          h('h2', null, '录入真人数据'),
-          action('下载 TSV 模板', () => downloadCalibrationTemplate(questions, runId, cohort), busy),
-          field('导入真人数据（TSV 或 JSON）', h('input', {
-            type: 'file', accept: '.tsv,.json', disabled: busy,
-            onChange: event => {
-              const file = event.target.files[0]
-              event.target.value = ''
-              if (file) void importCalibration(file)
-            },
-          })),
-          field('数据来源', surveyInput(source, setSource, { required: true, maxLength: 120, placeholder: '例如 11 月校园问卷' })),
-          field('样本总人数', surveyInput(total, setTotal, { type: 'number', required: true, min: 1, max: 1000000 })),
-          h('p', null, '按题填写各选项人数。少于样本总人数的部分计为缺答，整题留空表示暂无数据。'),
-          questions.map(question => h('fieldset', { key: question.id, style: surveyCard },
-            h('legend', null, question.text),
-            question.options.map((option, index) => h(React.Fragment, { key: option }, field(option, surveyInput(
-              counts[question.id]?.[index] ?? '', value => setCounts(old => ({
-                ...old, [question.id]: question.options.map((_, slot) => slot === index ? value : old[question.id]?.[slot] ?? ''),
-              })), { type: 'number', min: 0, max: 1000000 },
-            )))))),
-          h(Button, { type: 'submit', variant: 'primary', disabled: busy }, '保存并对比'),
-          errorMessage(error), notice && h('p', { role: 'status' }, notice)),
-        h('section', { style: surveyCard },
-          h('h2', null, '真人与模拟对比'),
-          h('p', null, saved ? '真人数据 · ' + saved.source : '未校准 · 录入真人数据后对比'),
-          questions.map(question => {
-            const human = saved?.rows.find(row => row.id === question.id)
-            const valid = human?.counts.reduce((sum, count) => sum + count, 0) ?? 0
-            const answers = jobs.filter(job => job.status === 'done')
-              .map(job => job.answers.find(answer => answer.id === question.id)?.answer)
-              .filter(answer => question.options.includes(answer))
-            const rows = question.options.map((option, index) => {
-              const real = valid ? human.counts[index] * 100 / valid : null
-              const simulated = answers.length ? answers.filter(answer => answer === option).length * 100 / answers.length : null
-              const delta = real !== null && simulated !== null ? simulated - real : null
-              const percent = value => value === null ? '—' : value.toFixed(1) + '%'
-              return h('tr', { key: option }, h('th', { scope: 'row' }, option), h('td', null, percent(real)),
-                h('td', null, percent(simulated)), h('td', null, delta === null ? '—' : (delta > 0 ? '+' : '') + delta.toFixed(1)))
-            })
-            return h('section', { key: question.id, style: surveyCard },
-              h('h3', null, question.text),
-              h('p', null, '有效答卷 · 真人 ' + (human ? valid + '/' + saved.total : '—') + ' · 模拟 ' + answers.length + '/' + jobs.length),
-              h('table', { style: { width: '100%', textAlign: 'left', fontVariantNumeric: 'tabular-nums' } },
-                h('thead', null, h('tr', null, ['选项', '真人', '模拟', '差值（百分点）'].map(label => h('th', { key: label, scope: 'col' }, label)))),
-                h('tbody', null, rows)))
-          })))
-    }
-
-    function SimulationPanel() {
-      const [title, setTitle] = useState('医患用药沟通调查')
-      const [material, setMaterial] = useState(sampleMaterial)
-      const [roles, setRoles] = useState(sampleRoles)
-      const [questions, setQuestions] = useState(sampleQuestions)
-      const [tab, setTab] = useState('draft')
-      const [cohort, setCohort] = useState(null)
-      const [questionnaireId, setQuestionnaireId] = useState('')
-      const [questionnaireMenu, setQuestionnaireMenu] = useState(false)
-      const [importOpen, setImportOpen] = useState(false)
-      const [importFile, setImportFile] = useState(null)
-      const [importError, setImportError] = useState('')
-      const [notice, setNotice] = useState('')
-      const batches = useSurveyLibrary('batches')
-      const questionnaires = useSurveyLibrary('questionnaires')
-      const [models, setModels] = useState(null)
-      const [model, setModel] = useState('')
-      const [concurrency, setConcurrency] = useState('6')
-      const [runs, setRuns] = useState([])
-      const [id, setId] = useState('')
-      const [result, setResult] = useState(null)
-      const [refresh, setRefresh] = useState(0)
-      const [answerPage, setAnswerPage] = useState(0)
-      const [busy, setBusy] = useState(false)
-      const [error, setError] = useState('')
-
-      useEffect(() => {
-        let live = true
-        const fail = failure => { if (live) setError(failure.message) }
-        call('/simulation/models').then(value => {
-          if (!live) return
-          setModels(value)
-          if (value.length) setModel('0')
-        }, fail)
-        call('/simulation/runs').then(value => {
-          if (!live) return
-          setRuns(value)
-          setId(current => current || value[0]?.id || '')
-        }, fail)
-        return () => { live = false }
-      }, [])
-
-      useEffect(() => {
-        if (!id) return
-        let live = true
-        let timer
-        async function poll() {
-          try {
-            const value = await call('/simulation/result?id=' + encodeURIComponent(id))
-            if (!live) return
-            setResult(value)
-            if (value.jobs.some(job => job.status === 'queued' || job.status === 'running')) timer = setTimeout(poll, 1200)
-          } catch (failure) {
-            if (live) setError(failure.message)
-          }
-        }
-        void poll()
-        return () => { live = false; clearTimeout(timer) }
-      }, [id, refresh])
-
-      async function start(event) {
-        event.preventDefault()
-        if (!models?.[model] || busy) return
-        setBusy(true)
-        setError('')
-        try {
-          const task = { title, material, ...models[model], roles, questions, concurrency: Number(concurrency) }
-          const run = await call('/simulation/run', task)
-          setRuns(previous => [{ id: run.id, title: title.trim() }, ...previous].slice(0, 30))
-          setResult(null)
-          setId(run.id)
-          setAnswerPage(0)
-          setCohort(null)
-          setTab('results')
-        } catch (failure) {
-          setError(failure.message)
-        } finally {
-          setBusy(false)
-        }
-      }
-
-      async function retry(role) {
-        if (busy) return
-        setBusy(true)
-        setError('')
-        try {
-          await call('/simulation/retry', { id, role })
-          setRefresh(value => value + 1)
-        } catch (failure) {
-          setError(failure.message)
-        } finally {
-          setBusy(false)
-        }
-      }
-
-      async function manageQuestionnaire(operation) {
-        if (busy) return
-        setBusy(true)
-        setError('')
-        setNotice('')
-        try { await operation() } catch (failure) { setError(failure.message) }
-        finally { setBusy(false) }
-      }
-      function applyQuestionnaire(draft, id = '') {
-        setQuestionnaireId(id)
-        setTitle(draft.title)
-        setMaterial(draft.material)
-        setQuestions(draft.questions.map(question => ({
-          ...question, options: question.options?.length ? question.options : null,
-        })))
-      }
-      function openQuestionnaire(id) {
-        if (!id) {
-          setQuestionnaireId('')
-          setNotice('')
-          return
-        }
-        void manageQuestionnaire(async () => {
-          const saved = await questionnaires.read(id)
-          applyQuestionnaire(saved, saved.id)
-        })
-      }
-      function saveQuestionnaire(id) {
-        void manageQuestionnaire(async () => {
-          const saved = await questionnaires.save({ id, title, material, questions })
-          setQuestionnaireId(saved.id)
-          await questionnaires.refresh()
-          setNotice('问卷已保存')
-        })
-      }
-
-      function chooseQuestionnaire(id) {
-        setQuestionnaireMenu(false)
-        if (id !== createOption) {
-          if (id !== (questionnaireId || normalOption)) openQuestionnaire(id === normalOption ? '' : id)
-          return
-        }
-        setQuestionnaireId('')
-        setTitle('')
-        setMaterial('')
-        setQuestions([{ id: crypto.randomUUID(), text: '', options: ['', ''] }])
-        setNotice('')
-        setError('')
-      }
-
-      function showQuestionnaireImport() {
-        setImportFile(null)
-        setImportError('')
-        setImportOpen(true)
-      }
-
-      async function importQuestionnaire() {
-        if (!importFile || busy) return
-        setBusy(true)
-        setImportError('')
-        try {
-          const draft = await readQuestionnaireFile(importFile)
-          const checked = await call('/simulation/questionnaires/validate', draft)
-          applyQuestionnaire(checked)
-          setImportOpen(false)
-          setError('')
-          setNotice('已导入 ' + checked.questions.length + ' 道题，可编辑后保存')
-        } catch (failure) {
-          setImportError(failure.message)
-        } finally {
-          setBusy(false)
-        }
-      }
-
-      const done = result?.jobs.filter(job => job.status === 'done' || job.status === 'failed').length ?? 0
-      const chooseRun = event => {
-        setResult(null)
-        setAnswerPage(0)
-        setCohort(null)
-        setId(event.target.value)
-      }
-      const groups = [...new Set(result?.jobs.map(job => job.group))]
-      const activeCalibration = result?.calibration.find(item => item.cohort === cohort)
-      const questionnaireLabel = questionnaires.items.find(item => item.id === questionnaireId)?.title ?? '当前草稿'
-      return h('main', { style: { minWidth: 0, width: '100%', height: '100%', overflow: 'auto', boxSizing: 'border-box' } },
-        h('div', { style: { maxWidth: 1180, padding: '24px clamp(14px, 3vw, 36px)', margin: '0 auto', display: 'grid', gap: 18 } },
-          h('header', { style: surveyField },
-            h('h1', { style: { margin: 0, fontSize: 28 } }, '问卷调查'),
-            h('p', { style: { margin: 0 } }, '编辑问卷和受访角色，运行模拟，再用真人答卷校准。')),
-          h('nav', { 'aria-label': '问卷调查', style: { display: 'flex', flexWrap: 'wrap', gap: 8 } },
-            [['draft', '问卷设计'], ['students', '学生批次'], ['results', '模拟结果'], ['calibration', '校准']].map(([value, label]) => h(Button, {
-              key: value, type: 'button', size: 'sm', variant: tab === value ? 'primary' : 'outline',
-              'aria-current': tab === value ? 'page' : undefined, onClick: () => setTab(value),
-            }, label))),
-          errorMessage(error || questionnaires.error),
-          tab === 'students' && h(StudentBatches, { library: batches, onApply: students => {
-            setRoles(students)
-            setNotice('已载入 ' + students.length + ' 名学生')
-            setTab('draft')
-          } }),
-          tab === 'draft' && h('form', {
-            onSubmit: start, style: { display: 'grid', gap: 18, container: 'persona-survey-editors / inline-size' },
-          },
-            h('section', { style: surveyCard },
-              h('h2', null, '基本设置'),
-              h('div', { style: { ...actionsStyle, alignItems: 'end' } },
-                h('div', { style: surveyField },
-                  h('span', null, '已保存问卷'),
-                  h(Menu, {
-                    open: questionnaireMenu, onClose: () => setQuestionnaireMenu(false),
-                    onSelect: chooseQuestionnaire, selectedId: questionnaireId || normalOption, align: 'start', portal: true,
-                    items: [
-                      { id: normalOption, label: '当前草稿' },
-                      { id: createOption, label: '新建空白问卷', icon: h(IconPlusOutlineRegular, { size: 16, 'aria-hidden': true }) },
-                      ...questionnaires.items.map(item => ({ id: item.id, label: item.title + ' · ' + item.count + ' 题' })),
-                    ],
-                    anchor: h(Button, {
-                      size: 'sm', type: 'button', variant: 'outline', disabled: busy,
-                      'aria-label': '已保存问卷：' + questionnaireLabel, 'aria-haspopup': 'menu',
-                      'aria-expanded': questionnaireMenu, onClick: () => setQuestionnaireMenu(open => !open),
-                    }, h('span', { style: { ...labelStyle, maxWidth: '14em' } }, questionnaireLabel),
-                    h(IconChevronDownOutlineRegular, { size: 14, 'aria-hidden': true })),
-                  })),
-                action(questionnaireId ? '保存修改' : '保存问卷', () => saveQuestionnaire(questionnaireId), busy),
-                questionnaireId && action('另存为新问卷', () => saveQuestionnaire(''), busy),
-                questionnaireId && action('删除问卷', () => {
-                  if (window.confirm('删除选中的已保存问卷？')) void manageQuestionnaire(async () => {
-                    await questionnaires.remove(questionnaireId)
-                    setQuestionnaireId('')
-                    await questionnaires.refresh()
-                    setNotice('已删除保存的问卷')
-                  })
-                }, busy)),
-              notice && h('p', { role: 'status' }, notice),
-              h('div', { style: surveyColumns },
-                field('问卷名称', surveyInput(title, setTitle, { maxLength: 100, required: true })),
-                field('运行模型', h('select', {
-              value: model, onChange: event => setModel(event.target.value), style: selectStyle,
-            },
-            h('option', { value: '', disabled: true }, models === null ? '正在加载模型…' : models.length ? '选择模型' : '请先在 DSH 配置模型'),
-            (models ?? []).map((item, index) => h('option', { key: item.provider + '/' + item.model, value: String(index) }, item.label + ' · ' + item.provider))))),
-              field('公共材料', surveyText(material, setMaterial, 3, 6000)),
-              field('并行作答数', surveyInput(concurrency, setConcurrency, { type: 'number', required: true, min: 1, max: 12, step: 1 })),
-              h('div', { style: actionsStyle },
-                h(Button, { type: 'submit', variant: 'primary', disabled: busy || !models?.[model] }, busy ? '处理中…' : '运行问卷'),
-                h('span', null, roles.length + ' 个角色 · ' + questions.length + ' 道题'))),
-            h(SurveyEditors, {
-              roles, setRoles, questions, setQuestions, busy,
-              onManageRoles: () => setTab('students'), onImport: showQuestionnaireImport,
-            })),
-          (tab === 'results' || tab === 'calibration') && (runs.length ? h('div', { style: actionsStyle },
-            field('运行记录', h('select', { value: id, style: { ...selectStyle, maxWidth: '100%' }, disabled: busy, onChange: chooseRun },
-              runs.map(run => h('option', { key: run.id, value: run.id },
-                run.title + (run.created ? ' · ' + new Date(run.created).toLocaleString() : ' · 刚刚'))))),
-            tab === 'calibration' && result && field('对比分组', h('select', {
-              value: cohort === null ? '' : String(groups.indexOf(cohort)),
-              style: selectStyle, onChange: event => setCohort(event.target.value === '' ? null : groups[Number(event.target.value)]),
-            }, h('option', { value: '' }, '全部角色'),
-            groups.map((group, index) => h('option', { key: group, value: String(index) }, group || '未分组')))))
-            : h('section', { style: surveyCard },
-              h('p', null, tab === 'calibration' ? '先运行问卷，再录入该次运行对应的真人数据。' : '运行问卷后查看结果。'),
-              action('前往问卷设计', () => setTab('draft')))),
-          tab === 'results' && result && h('section', { style: surveyCard },
-              h('div', { style: { ...actionsStyle, alignItems: 'center', justifyContent: 'space-between' } },
-                h('h2', null, '逐人答卷'),
-                action('导出答卷 CSV', () => downloadSurveyResults(result))),
-              h('label', null, '已处理 ' + done + ' / ' + result.jobs.length,
-                h('progress', { value: done, max: result.jobs.length, style: textareaStyle })),
-              h('p', null, '并行上限 ' + result.concurrency + ' · 正在作答 ' + result.jobs.filter(job => job.status === 'running').length),
-              action('前往校准', () => setTab('calibration')),
-              result.jobs.length > 20 && h('div', { style: actionsStyle },
-                action('上一页答卷', () => setAnswerPage(page => page - 1), answerPage === 0),
-                h('span', null, (answerPage * 20 + 1) + '–' + Math.min((answerPage + 1) * 20, result.jobs.length) + ' / ' + result.jobs.length),
-                action('下一页答卷', () => setAnswerPage(page => page + 1), (answerPage + 1) * 20 >= result.jobs.length)),
-              result.jobs.slice(answerPage * 20, (answerPage + 1) * 20).map(job => h('details', { key: job.role },
-                h('summary', null, [job.name, job.group, jobStatus[job.status]].filter(Boolean).join(' · ')),
-                job.error && h('p', null, job.error),
-                job.status === 'failed' && h(Button, {
-                  type: 'button', size: 'sm', variant: 'outline', disabled: busy, onClick: () => retry(job.role),
-                }, '重试此角色'),
-                job.answers.map(item => h('div', { key: item.id },
-                  h('strong', null, result.questions.find(question => question.id === item.id)?.text),
-                  h('p', { style: { whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } }, item.answer ?? '缺答'))))),
-            ),
-          tab === 'calibration' && result && h(CalibrationForm, {
-            key: JSON.stringify([id, cohort]), result, runId: id, cohort, saved: activeCalibration,
-            onSaved: () => setRefresh(value => value + 1),
-          }),
-          importOpen && h(Modal, {
-            title: '导入问卷', closeLabel: '关闭', open: true,
-            onClose: () => { if (!busy) setImportOpen(false) },
-            footer: h(React.Fragment, null,
-              action('取消', () => setImportOpen(false), busy),
-              h(Button, { type: 'button', variant: 'primary', disabled: !importFile || busy, onClick: importQuestionnaire }, '导入到新草稿')),
-          }, h('div', { style: { display: 'grid', gap: 12 } },
-            h('p', null, '支持 Markdown（.md）、JSON 和 TSV。'),
-            h('details', null, h('summary', null, 'Markdown 格式示例'),
-              h('pre', { style: { whiteSpace: 'pre-wrap' } }, [
-                '# 医患用药沟通调查', '', '## 公共材料', '这是虚构的门诊沟通场景。', '',
-                '## 题目', '### 1. 用药说明是否清楚？', '- 清楚', '- 有疑问', '',
-                '### 2. 还有哪些疑问？',
-              ].join('\n'))),
-            h('p', null, 'TSV 使用「题干、题型、选项」三列，单选题选项用 | 分隔。开放题留空。'),
-            h('p', null, '导入会替换当前编辑区，保存后可在问卷列表找到。'),
-            field('问卷文件', h('input', { type: 'file', accept: '.md,.json,.tsv', disabled: busy,
-              onChange: event => { setImportFile(event.target.files[0] ?? null); setImportError('') } })),
-            errorMessage(importError))),
+            h(IconPlusOutline16, { size: 14, 'aria-hidden': true }),
+            t('new')),
+          ),
         ),
+        !id && !personas.length && h('p', { className: 'dpm_notice' }, t('createFirstHint')),
+        h('form', { className: 'dpm_card', onSubmit: save },
+          h('div', { className: 'dpm_cardHeader' },
+            h('h3', { className: 'dpm_cardTitle' }, id ? t('profileSection') : t('newPersonaTitle')),
+            savedFlag && h('span', { className: 'dpm_statusText', role: 'status' },
+              h(IconCheckOutline16, { size: 14, 'aria-hidden': true }),
+              t('saved')),
+          ),
+          h('label', { className: 'dpm_field' },
+            h('span', { className: 'dpm_label' }, t('name')),
+            h(Input, {
+              value: name, required: true, maxLength: 48, placeholder: t('namePlaceholder'), disabled: busy,
+              onChange: event => { setSavedFlag(false); setName(event.target.value) },
+            })),
+          h('label', { className: 'dpm_field' },
+            h('span', { className: 'dpm_label' }, t('instructions')),
+            h('textarea', {
+              className: 'dpm_textarea', value: instructions, rows: 4, maxLength: 3500, disabled: busy,
+              placeholder: t('instructionsPlaceholder'),
+              onChange: event => { setSavedFlag(false); setInstructions(event.target.value) },
+            }),
+            h('p', { className: 'dpm_hint' }, t('instructionsHint'))),
+          id && h('div', { className: 'dpm_settingRow' },
+            h('div', { className: 'dpm_settingInfo' },
+              h('span', { className: 'dpm_label' }, t('autoMemory')),
+              h('p', { className: 'dpm_hint' }, t('autoMemoryDesc')),
+            ),
+            h(Switch, {
+              checked: autoMemory,
+              label: t('autoMemory'),
+              disabled: busy,
+              onChange: toggleAutoMemory,
+            }),
+          ),
+          h('div', { className: 'dpm_actions' },
+            h(Button, { variant: 'primary', size: 'sm', type: 'submit', disabled: busy || !name.trim() }, t('save')),
+          ),
+        ),
+        errorMessage(error, t),
+        id && h(MemoryPanel, { key: id, id, t }),
       )
     }
 
@@ -1498,12 +1096,6 @@ window.__ModuleLoader__.load({
         ctx.slots.inject('conversation.input.left', () => ctx.slots.register({
           name: 'conversation.input.left', id: ns, order: 32, locale: ns,
         }, props => h(Picker, { key: String(props.sessionId ?? ''), ...props, t })))
-        ctx.slots.inject('main', () => ctx.slots.register({
-          name: 'main', key: simulationPanel,
-        }, SimulationPanel))
-        ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
-          name: 'sidebar.panellist', id: simulationPanel, order: 21, label: () => '模拟任务',
-        }, props => h(IconListPenOutlineRegular, { ...props, 'aria-hidden': true })))
       },
     }
   },

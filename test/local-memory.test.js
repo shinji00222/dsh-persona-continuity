@@ -169,3 +169,34 @@ test('review accepts a correction from a later bound turn and rejects an older s
   assert.equal((await reviewMemories(llm, { ...options, notes: [note] }, signal))[0].source.session, 'new-chat')
   assert.deepEqual(await reviewMemories(llm, { ...options, notes: [{ ...note, updated: 400 }] }, signal), [])
 })
+
+test('automatic review claims only new work, defers active personas, and persists the core index', t => {
+  const { db, memory } = fixture(t)
+  let store = new Store(db)
+  const persona = store.savePersona('', 'A', '')
+  store.bind('a', persona)
+  const upcoming = { ...job('a', persona), input: JSON.stringify({ user: '首版只做 Windows' }) }
+  store.enqueue(upcoming)
+  store.finish(store.nextJob(), [input, { ...input, topic: 'redundant' }])
+  const keep = store.rows(persona, 'workspace').find(note => note.topic === 'platform')
+  const drop = store.rows(persona, 'workspace').find(note => note.topic === 'redundant')
+  const future = Date.now() + 310000
+  assert.equal(store.nextReview(new Set()), undefined)
+  assert.equal(store.nextReview(new Set([persona]), future), undefined)
+  store.close()
+  store = new Store(db)
+  try {
+    const batch = store.nextReview(new Set(), future)
+    assert.deepEqual(batch.sources.map(row => row.turn), [1])
+    assert.equal(store.nextReview(new Set(), future), undefined)
+    store.finishReview(batch, () => {
+      assert.equal(store.mergeDuplicate(persona, keep, drop), true)
+      store.saveCore(persona, 'workspace', [keep.id])
+    })
+    assert.equal(store.nextReview(new Set(), future + 999999), undefined)
+    assert.equal(store.detail(persona, drop.id), undefined)
+    assert.equal(store.catalog(persona, 'workspace')[0].summary, input.summary)
+    assert.deepEqual(store.catalog(persona, 'elsewhere'), [])
+    assert.match(readFileSync(join(memory, persona, 'MEMORY.md'), 'utf8'), /核心记忆[\s\S]*首版只做 Windows/)
+  } finally { store.close() }
+})

@@ -1,12 +1,19 @@
 {
   "name": "dsh-persona-continuity",
-  "version": "0.2.0-preview.14",
+  "version": "0.2.0-preview.15",
   "private": true,
   "type": "module",
   "engines": {
     "node": ">=22.13"
   },
-  "description": "Per-persona cross-session memory and survey simulation for DeepSeek Harness.",
+  "description": "Per-persona cross-session memory for DeepSeek Harness.",
+  "keywords": [
+    "deepseek-harness",
+    "dsh-plugin",
+    "persona",
+    "persona-memory",
+    "agent-memory"
+  ],
   "license": "MIT",
   "exports": {
     ".": "./index.js",
@@ -16,19 +23,23 @@
   "files": [
     "index.js",
     "client.js",
-    "lib",
+    "lib/store.js",
+    "lib/local-memory.js",
+    "lib/extract.js",
+    "lib/history.js",
+    "lib/web.js",
     "locale",
     "docs/research.md",
     "docs/project-plan.md",
-    "docs/simulation-plan.md",
-    "docs/simulation-research.md",
     "docs/development-log.md",
+    "docs/tobs-integration-plan.md",
+    "docs/tobs-integration-research.md",
     "cordis.patch.yml",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "check": "node --check index.js && node --check client.js && node --check lib/store.js && node --check lib/extract.js && node --check lib/web.js && node --check lib/simulation.js && node --check lib/history.js",
+    "check": "node --check index.js && node --check client.js && node --check lib/store.js && node --check lib/local-memory.js && node --check lib/extract.js && node --check lib/web.js && node --check lib/history.js",
     "test": "node --test"
   },
   "dsh": {
