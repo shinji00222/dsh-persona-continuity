@@ -1,12 +1,14 @@
 import { createHash } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { Store } from './lib/store.js'
-import { extract, rememberableInput, textBlocks } from './lib/extract.js'
+import { extract, rememberableInput, reviewMemories, textBlocks } from './lib/extract.js'
 import { registerWeb } from './lib/web.js'
 import { createSimulation } from './lib/simulation.js'
 import {
-  chunksFromEvents, historyRequest, listSessionsForImport, modelFromEvents, readConversationChunks, retrieveHistory,
+  chunksFromEvents, historyRequest, listSessionsForImport, modelFromEvents, readConversationChunks,
+  recentMemorySources, retrieveHistory,
 } from './lib/history.js'
 
 export const name = 'persona-continuity'
@@ -36,9 +38,13 @@ function hasHistoryEvents(events) {
 
 export function apply(ctx) {
   const root = process.env.DSH_HOME?.trim() || join(homedir(), '.dsh')
-  const store = new Store(join(root, 'persona-continuity', 'memory.sqlite'))
+  const currentDb = join(root, name, 'memory.sqlite')
+  const previousName = name === 'persona-continuity' ? 'persona-memory-sim' : 'persona-continuity'
+  const previousDb = join(root, previousName, 'memory.sqlite')
+  const store = new Store(!existsSync(currentDb) && existsSync(previousDb) ? previousDb : currentDb)
   const attached = new Map()
   const turns = new Map()
+  const reviews = new Set()
   const lifetime = new AbortController()
   const simulation = createSimulation(store, ctx.llm, lifetime.signal)
   let draining = false
@@ -95,7 +101,7 @@ export function apply(ctx) {
       if (!persona) return { found: false, reason: 'not-bound' }
       const workspace = session.header?.cwd ?? ''
       if (typeof args?.memory_id === 'string' && args.memory_id.trim()) {
-        const entry = store.detail(persona.id, args.memory_id.trim())
+        const entry = store.detail(persona.id, args.memory_id.trim(), workspace)
         return entry ? { found: true, memory: entry } : { found: false }
       }
       const timeout = AbortSignal.timeout(6000)
@@ -120,6 +126,15 @@ export function apply(ctx) {
         .catch(() => ({ status: 'unavailable' }))
       return { memories, history }
     },
+  }
+
+  function readCatalog(persona, workspace) {
+    try {
+      return store.catalog(persona, workspace, 16)
+    } catch {
+      ctx.logger.warn('persona memory catalog is temporarily unavailable')
+      return []
+    }
   }
 
   const attach = agent => {
@@ -148,7 +163,7 @@ export function apply(ctx) {
             JSON.stringify({ result: turn.history.status, ...turn.history }),
           ].join('\n')
           const rows = turn?.recall ?? []
-          const catalog = store.catalog(persona.id, session.header?.cwd ?? '', 16)
+          const catalog = turn?.catalog ?? readCatalog(persona.id, session.header?.cwd ?? '')
           if (!rows.length && !catalog.length) {
             return '当前人格暂无长期记忆。如需检索同人格同工作区的历史对话或代码片段，请调用 persona_recall 工具；严禁读取或解压 ~/.dsh/sessions/ 下的原始日志文件。未绑定到当前人格的会话不可访问。'
           }
@@ -182,8 +197,11 @@ export function apply(ctx) {
         if (!job) break
         try {
           const signal = AbortSignal.any([lifetime.signal, AbortSignal.timeout(45000)])
-          const known = store.topics(job.persona, job.workspace)
-          const items = await extract(ctx.llm, job, known, signal)
+          const memoryPersona = store.persona(job.persona)
+          const known = store.topics(job.persona, job.workspace, 5000)
+          const items = store.preparedItems(job) ?? await extract(
+            ctx.llm, { ...job, memoryPersona }, known, signal,
+          )
           if (!lifetime.signal.aborted) store.finish(job, items)
         } catch {
           if (!lifetime.signal.aborted) store.fail(job)
@@ -290,7 +308,7 @@ export function apply(ctx) {
   }
 
   function enqueueSessionHistory(sessionId, persona, info) {
-    if (!info?.hasHistory) return
+    if (!info?.hasHistory || !store.autoMemory(persona)) return
     const target = rememberModel(resolveModel(sessionId) ?? info.model)
     if (!target) return
     const chunks = info.chunks()
@@ -336,10 +354,54 @@ export function apply(ctx) {
       enqueueSessionHistory(session, personaId, info)
       return api.state(session)
     },
-    save: (id, name, instructions) => store.savePersona(id, name, instructions),
+    save(id, name, instructions, autoMemory) {
+      const saved = store.savePersona(id, name, instructions)
+      if (autoMemory !== undefined) store.setAutoMemory(saved, autoMemory)
+      return saved
+    },
+    autoMemory: (id, enabled) => store.setAutoMemory(id, enabled),
     list: (persona, query) => store.search(persona, '', query),
     edit: (persona, id, value) => store.edit(persona, id, value),
-    forget: (persona, id) => store.forget(persona, id),
+    forget: (persona, id, revision) => store.forget(persona, id, revision),
+    async review(personaId, sessionId) {
+      const session = ctx.sessions.get(sessionId)
+      const persona = supported(session) && store.personaFor(sessionId)
+      if (!persona || persona.id !== personaId) throw new Error('请先打开该人格的会话')
+      if (!store.autoMemory(personaId)) throw new Error('请先开启此人格的自动记忆')
+      if (reviews.has(personaId)) throw new Error('此人格正在回顾记忆')
+      const target = modelForSession(sessionId)
+      if (!target) throw new Error('请先给当前会话选择模型')
+      const workspace = session.header?.cwd ?? ''
+      const notes = store.rows(personaId, workspace).filter(note => !note.manual).slice(0, 10)
+      if (!notes.length) return { updated: 0 }
+      const started = Date.now()
+      const signal = AbortSignal.any([lifetime.signal, AbortSignal.timeout(45000)])
+      reviews.add(personaId)
+      try {
+        const allowed = store.boundSessions(personaId)
+        const sources = await recentMemorySources(ctx.sessionQuery, session.header, allowed, signal)
+        if (!sources.length) return { updated: 0 }
+        const changes = await reviewMemories(ctx.llm, { target, sessionId, persona, notes, sources }, signal)
+        signal.throwIfAborted()
+        return { updated: store.transaction(() => {
+          if (!store.autoMemory(personaId) || store.personaFor(sessionId)?.id !== personaId) return 0
+          let updated = 0
+          for (const change of changes) {
+            const { note, source, evidence, title, summary, detail } = change
+            if (store.personaFor(source.session)?.id !== personaId) continue
+            updated += store.saveExtractedMemories({
+              persona: personaId, session: source.session, turn: source.turn, workspace: note.workspace,
+              created: started, source: 'review', items: [{
+                kind: note.kind, topic: note.topic, title, summary, detail, evidence, expectedRevision: note.revision,
+              }],
+            })
+          }
+          return updated
+        }) }
+      } finally {
+        reviews.delete(personaId)
+      }
+    },
     async historySessions() {
       const signal = AbortSignal.any([lifetime.signal, AbortSignal.timeout(8000)])
       return listSessionsForImport(ctx.sessionQuery, store.bindingsMap(), signal)
@@ -348,6 +410,7 @@ export function apply(ctx) {
       if (typeof persona !== 'string' || !store.personas().some(item => item.id === persona)) {
         throw new Error('人格不存在')
       }
+      if (!store.autoMemory(persona)) throw new Error('请先开启此人格的自动记忆')
       const ids = [...new Set(Array.isArray(sessions) ? sessions.filter(item => typeof item === 'string' && item) : [])].slice(0, 20)
       if (!ids.length) throw new Error('请选择至少一段旧对话')
       const fallbackTarget = resolveModel(typeof activeSession === 'string' ? activeSession : '')
@@ -450,8 +513,13 @@ export function apply(ctx) {
             turn.history = { status: 'unavailable' }
           }
         } else {
-          turn.recall = store.recall(turn.persona, agent.session.header?.cwd ?? '', query, String(agent.session.id))
+          try {
+            turn.recall = store.recall(turn.persona, agent.session.header?.cwd ?? '', query, String(agent.session.id))
+          } catch {
+            ctx.logger.warn('persona memory recall is temporarily unavailable')
+          }
         }
+        turn.catalog = readCatalog(turn.persona, agent.session.header?.cwd ?? '')
       }
     }
     return next()
